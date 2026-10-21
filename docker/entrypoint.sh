@@ -28,7 +28,8 @@ if [ -d "${SHIPPED_PACKS}" ] && [ "${SHIPPED_PACKS}" != "${MODELS_DIR}" ]; then
   done
 fi
 
-# First start writes bootstrap.key and data/admin.password. Later starts stay quiet.
+# Creates the data directory and database. The console asks for the admin password
+# when no account exists yet.
 openrecognition bootstrap
 
 exec "$@"

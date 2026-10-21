@@ -391,6 +391,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class SetupRequest(BaseModel):
+    username: str = Field(default="admin", min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=72)
+
+
 class UserOut(BaseModel):
     id: str
     username: str

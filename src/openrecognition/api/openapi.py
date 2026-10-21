@@ -89,7 +89,7 @@ Most endpoints require an API key:
 - `Authorization: Bearer <api_key>`, or
 - `X-API-Key: <api_key>`
 
-Use **Authorize** in Swagger UI to set your key. Bootstrap key path: `data/bootstrap.key` (or `/data/bootstrap.key` in Docker).
+Use **Authorize** in Swagger UI to set your key. Create a key in the console; only its hash is stored.
 
 Scopes: `recognize`, `enroll`, `read`, `admin`.
 """

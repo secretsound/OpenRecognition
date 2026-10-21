@@ -97,6 +97,9 @@ class SessionService:
         )
         return dict(row) if row else None
 
+    def has_users(self) -> bool:
+        return self.db.fetchone("SELECT id FROM users LIMIT 1") is not None
+
     def count_admins(self) -> int:
         row = self.db.fetchone(
             "SELECT COUNT(*) as c FROM users WHERE role = ?", ("admin",)

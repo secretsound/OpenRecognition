@@ -28,12 +28,14 @@ def client():
 
 @pytest.fixture(scope="module")
 def admin_key(client):
-    bootstrap = Path(tmpdir) / "bootstrap.key"
-    if bootstrap.exists():
-        return bootstrap.read_text().strip()
-    # First request triggers bootstrap
-    client.get("/health")
-    return bootstrap.read_text().strip()
+    state = client.app.state.app_state
+    if not state.sessions.has_users():
+        state.sessions.create_user("admin", "test-admin-password", "admin")
+    created = state.api_keys.create_key(
+        "test-admin",
+        ["admin", "read", "enroll", "recognize"],
+    )
+    return created["key"]
 
 
 @pytest.fixture

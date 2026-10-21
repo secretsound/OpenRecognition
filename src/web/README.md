@@ -21,7 +21,7 @@ Open **[https://localhost:5173](https://localhost:5173)** (Vite uses a self-sign
 
 **Microphone / voice enrollment** requires a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). The dev server enables HTTPS for that reason. The built-in UI at `http://127.0.0.1:8080` works for mic only when the hostname is `localhost` or `127.0.0.1`; remote HTTP URLs will block recording.
 
-Default user: `admin`. On first start the password is written to `data/admin.password` (mode 0600) and printed once by `openrecognition bootstrap`. Change it after you sign in.
+On a new data directory the console asks you to create the admin account. That password is stored in the database. Create API keys in the console after you sign in.
 
 ## Production build
 

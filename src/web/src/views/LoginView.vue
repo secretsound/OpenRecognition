@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { NButton, NCard, NForm, NFormItem, NInput, useMessage } from "naive-ui";
 import type { FormInst, FormRules } from "naive-ui";
 import { useAuth } from "@/composables/useAuth";
 import { useTheme } from "@/composables/useTheme";
-import { ApiError } from "@/api/client";
+import { api, ApiError } from "@/api/client";
 import { safeAppPath } from "@/utils/safeRedirect";
 import LogoMark from "@/components/LogoMark.vue";
 
@@ -15,17 +15,46 @@ const ROLE_KEY = "or-role";
 const router = useRouter();
 const route = useRoute();
 const message = useMessage();
-const { login } = useAuth();
+const { login, setSession } = useAuth();
 const { isDark } = useTheme();
 
 const formRef = ref<FormInst | null>(null);
 const loading = ref(false);
-const model = ref({ username: "", password: "" });
+const checking = ref(true);
+const setupRequired = ref(false);
+const model = ref({ username: "admin", password: "", confirm: "" });
 
 const rules: FormRules = {
   username: [{ required: true, message: "Username is required", trigger: "blur" }],
-  password: [{ required: true, message: "Password is required", trigger: "blur" }],
+  password: [
+    { required: true, message: "Password is required", trigger: "blur" },
+    {
+      validator: (_rule, value: string) => !setupRequired.value || value.length >= 8,
+      message: "Use at least 8 characters",
+      trigger: "blur",
+    },
+  ],
+  confirm: [
+    {
+      validator: (_rule, value: string) => !setupRequired.value || value === model.value.password,
+      message: "Passwords do not match",
+      trigger: "blur",
+    },
+  ],
 };
+
+onMounted(async () => {
+  try {
+    const status = await api<{ required: boolean }>("/v1/auth/setup", { skipAuthRedirect: true });
+    setupRequired.value = status.required;
+    if (!status.required) model.value.username = "";
+  } catch {
+    setupRequired.value = false;
+    model.value.username = "";
+  } finally {
+    checking.value = false;
+  }
+});
 
 async function onSubmit() {
   try {
@@ -35,7 +64,13 @@ async function onSubmit() {
   }
   loading.value = true;
   try {
-    const res = await login(model.value.username, model.value.password);
+    const res = setupRequired.value
+      ? await api<{ username: string; role: string }>("/v1/auth/setup", {
+          method: "POST",
+          json: { username: model.value.username.trim(), password: model.value.password },
+        })
+      : await login(model.value.username, model.value.password);
+    setSession(res.username, res.role);
     sessionStorage.setItem(USER_KEY, res.username);
     sessionStorage.setItem(ROLE_KEY, res.role);
     message.success(`Welcome, ${res.username}`);
@@ -55,12 +90,18 @@ async function onSubmit() {
         <LogoMark :size="40" />
         <div>
           <h1>OpenRecognition</h1>
-          <p>Enroll people, pets, objects, and sounds, then recognize them from audio, photos, or video.</p>
+          <p v-if="setupRequired">Choose the admin account for this server. It is stored in the database on this machine.</p>
+          <p v-else>Enroll people, pets, objects, and sounds, then recognize them from audio, photos, or video.</p>
         </div>
       </div>
-      <NForm ref="formRef" :model="model" :rules="rules" size="large" @submit.prevent="onSubmit">
+      <p v-if="checking" class="login-hint">Checking this server…</p>
+      <NForm v-else ref="formRef" :model="model" :rules="rules" size="large" @submit.prevent="onSubmit">
         <NFormItem path="username" label="Username">
-          <NInput v-model:value="model.username" placeholder="Username" autocomplete="username" />
+          <NInput
+            v-model:value="model.username"
+            placeholder="Username"
+            autocomplete="username"
+          />
         </NFormItem>
         <NFormItem path="password" label="Password">
           <NInput
@@ -68,12 +109,23 @@ async function onSubmit() {
             type="password"
             show-password-on="click"
             placeholder="Password"
-            autocomplete="current-password"
+            :autocomplete="setupRequired ? 'new-password' : 'current-password'"
           />
         </NFormItem>
-        <NButton type="primary" block attr-type="submit" :loading="loading">Sign in</NButton>
+        <NFormItem v-if="setupRequired" path="confirm" label="Confirm password">
+          <NInput
+            v-model:value="model.confirm"
+            type="password"
+            show-password-on="click"
+            placeholder="Confirm password"
+            autocomplete="new-password"
+          />
+        </NFormItem>
+        <NButton type="primary" block attr-type="submit" :loading="loading">
+          {{ setupRequired ? "Create account" : "Sign in" }}
+        </NButton>
       </NForm>
-      <p class="login-hint">Use the admin account for this server. Change the password after you sign in.</p>
+      <p v-if="!checking && !setupRequired" class="login-hint">Use the admin account for this server.</p>
     </NCard>
   </div>
 </template>

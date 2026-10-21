@@ -4,6 +4,7 @@ from pathlib import Path
 
 from openrecognition.bootstrap import run_bootstrap
 from openrecognition.config import Settings
+from openrecognition.gallery.db import Database
 
 
 def _settings(tmp: str) -> Settings:
@@ -13,35 +14,15 @@ def _settings(tmp: str) -> Settings:
     )
 
 
-def test_run_bootstrap_creates_key_once():
+def test_run_bootstrap_creates_database_without_credentials():
     with tempfile.TemporaryDirectory() as tmp:
         cfg = _settings(tmp)
-        result = run_bootstrap(cfg)
-        assert result.api_key
-        assert result.admin_password
-        assert result.admin_password != "admin"
-        assert cfg.bootstrap_key_path.read_text().strip() == result.api_key
-        assert cfg.admin_password_path.read_text().strip() == result.admin_password
-        assert oct(cfg.admin_password_path.stat().st_mode & 0o777) == "0o600"
+        run_bootstrap(cfg)
+        assert cfg.db_path.is_file()
+        assert not cfg.bootstrap_key_path.exists()
+        assert not cfg.admin_password_path.exists()
+        assert Database(cfg.db_path).fetchone("SELECT id FROM users LIMIT 1") is None
+        assert Database(cfg.db_path).fetchone("SELECT id FROM api_keys LIMIT 1") is None
 
-        again = run_bootstrap(cfg)
-        assert again.api_key is None
-        assert again.admin_password is None
-        assert cfg.admin_password_path.read_text().strip() == result.admin_password
-
-
-def test_run_bootstrap_replaces_default_admin_password():
-    with tempfile.TemporaryDirectory() as tmp:
-        cfg = _settings(tmp)
-        cfg.data_dir.mkdir(parents=True)
-        from openrecognition.auth.sessions import SessionService
-        from openrecognition.gallery.db import Database
-
-        sessions = SessionService(Database(cfg.db_path))
-        assert sessions.ensure_default_admin(password="admin") == "admin"
-
-        result = run_bootstrap(cfg)
-        assert result.admin_password
-        assert result.admin_password != "admin"
-        assert sessions.authenticate_user("admin", result.admin_password)
-        assert sessions.authenticate_user("admin", "admin") is None
+        run_bootstrap(cfg)
+        assert Database(cfg.db_path).fetchone("SELECT id FROM users LIMIT 1") is None

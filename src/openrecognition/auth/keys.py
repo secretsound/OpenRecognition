@@ -33,19 +33,6 @@ class ApiKeyService:
     def __init__(self, db: Database):
         self.db = db
 
-    def bootstrap_admin(self, path) -> str | None:
-        row = self.db.fetchone(
-            "SELECT id FROM api_keys WHERE revoked_at IS NULL LIMIT 1"
-        )
-        if row:
-            return None
-        key = f"or_{secrets.token_urlsafe(32)}"
-        self.create_key("bootstrap-admin", ["admin", "read", "enroll", "recognize"], key)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(key)
-        path.chmod(0o600)
-        return key
-
     def create_key(
         self,
         name: str,

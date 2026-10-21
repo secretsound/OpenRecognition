@@ -20,6 +20,7 @@ from openrecognition.models.schemas import (
     LoginRequest,
     McpResourceOut,
     McpToolOut,
+    SetupRequest,
     UserCreate,
     UserOut,
     UserPatch,
@@ -27,13 +28,13 @@ from openrecognition.models.schemas import (
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
-_INSECURE_COOKIE_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "testserver"})
-
 
 def _cookie_secure(request: Request) -> bool:
-    """Secure cookies everywhere except loopback HTTP (and the test client)."""
-    host = (request.url.hostname or "").lower()
-    return not (host in _INSECURE_COOKIE_HOSTS and request.url.scheme != "https")
+    """Match the scheme the browser used. A Secure cookie is dropped on plain HTTP, including a LAN address."""
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded in {"https", "http"}:
+        return forwarded == "https"
+    return request.url.scheme == "https"
 
 
 def _session_cookie(request: Request, response: Response, sid: str, max_age: int) -> None:
@@ -213,6 +214,30 @@ def delete_user(
             raise not_found("User not found")
     except ValueError as e:
         raise bad_request("INVALID_USER", str(e))
+
+
+@router.get("/setup")
+def setup_status(state: AppState = Depends(get_state)):
+    return {"required": not state.sessions.has_users()}
+
+
+@router.post("/setup")
+def setup_admin(
+    body: SetupRequest,
+    request: Request,
+    response: Response,
+    state: AppState = Depends(get_state),
+):
+    if state.sessions.has_users():
+        raise bad_request("ALREADY_CONFIGURED", "An admin account already exists")
+    username = body.username.strip()
+    try:
+        user = state.sessions.create_user(username, body.password, "admin")
+    except ValueError as exc:
+        raise bad_request("INVALID_ACCOUNT", str(exc)) from exc
+    sid = state.sessions.create_session(user["id"])
+    _session_cookie(request, response, sid, state.settings.session_ttl_minutes * 60)
+    return {"username": user["username"], "role": user["role"]}
 
 
 @router.post("/login")

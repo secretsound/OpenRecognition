@@ -34,6 +34,13 @@ ENV OPENRECOGNITION_HOST=0.0.0.0 \
     OPENRECOGNITION_WEB_DIST=/app/web/dist
 
 VOLUME /data /models
+
+LABEL org.opencontainers.image.title="OpenRecognition" \
+    org.opencontainers.image.description="Self-hosted voice, face, and object recognition. Mount /data and /models. The console listens on port 8080." \
+    org.opencontainers.image.source="https://github.com/secretsound/OpenRecognition" \
+    org.opencontainers.image.url="https://github.com/secretsound/OpenRecognition" \
+    org.opencontainers.image.documentation="https://github.com/secretsound/OpenRecognition/blob/main/docker/README.md" \
+    org.opencontainers.image.licenses="Apache-2.0"
 # EXPOSE documents ports; publish them at run time (e.g. docker compose ports: 8080, 10301).
 EXPOSE 8080 10301/tcp
 

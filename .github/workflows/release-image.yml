@@ -64,6 +64,11 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
           flavor: |
             latest=auto
+          labels: |
+            org.opencontainers.image.title=OpenRecognition
+            org.opencontainers.image.description=Self-hosted voice, face, and object recognition. Mount /data and /models. The console listens on port 8080.
+            org.opencontainers.image.documentation=https://github.com/secretsound/OpenRecognition/blob/main/docker/README.md
+            org.opencontainers.image.licenses=Apache-2.0
 
       - name: Confirm image tags
         env:

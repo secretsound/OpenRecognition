@@ -194,7 +194,7 @@ def main():
 
     p_boot = sub.add_parser(
         "bootstrap",
-        help="Create data dir, DB, one-time admin password, and bootstrap API key (no server)",
+        help="Create the data directory and database (no server)",
     )
     p_boot.set_defaults(func=cmd_bootstrap)
 

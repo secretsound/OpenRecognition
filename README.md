@@ -16,21 +16,24 @@ Samples turn into embeddings and get compared locally. Install the ONNX weights 
 
 ## Get started
 
-Docker is the fast way in. The first start writes an admin API key and a one-time console password into the data volume.
+Docker is the fast way in. On a new data volume the console asks you to create the admin account. The password stays in the database.
 
 ```bash
 docker compose up --build
 ```
 
-The gallery stays in `/data` and model weights stay in `/models`. Either mount can be a NAS share; see [Deployment tiers](docs/deployment-tiers.md).
-
-A published GitHub release also pushes this image to GHCR. Pull a version with:
+The gallery stays in `/data` and model weights stay in `/models`. Either mount can be a NAS share. The published image is [`ghcr.io/secretsound/openrecognition`](https://github.com/secretsound/OpenRecognition/pkgs/container/openrecognition).
 
 ```bash
-OPENRECOGNITION_IMAGE=ghcr.io/<owner>/<repo>:0.1.0 docker compose up
+docker pull ghcr.io/secretsound/openrecognition:dev
+docker run -d --name openrecognition \
+  --publish 8080:8080 \
+  --volume openrecognition-data:/data \
+  --volume openrecognition-models:/models \
+  ghcr.io/secretsound/openrecognition:dev
 ```
 
-Tags, platforms, and the workflow are in [Deployment tiers](docs/deployment-tiers.md).
+Variables use the `OPENRECOGNITION_` prefix. The image already sets `HOST=0.0.0.0`, `PORT=8080`, `DATA_DIR=/data`, `MODEL_PACKS_DIR=/models`, and `PACK=edge`. `AUTH_REQUIRED` and `WEB_ENABLED` default to `true`. Set `WYOMING_ENABLED=true` and publish `10301` when Home Assistant should use the Wyoming proxy. MQTT stays off until `MQTT_ENABLED=true`. The [container guide](docker/README.md) lists every variable, the volume layout, and the release tags.
 
 Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/) and sign in as `admin`. The API explorer is at [/docs](http://127.0.0.1:8080/docs).
 
@@ -45,6 +48,7 @@ From Python 3.12: `pip install -e .`, then `openrecognition bootstrap` and `open
 | [Architecture](docs/architecture.md) | How a request moves through the service |
 | [Deployment tiers](docs/deployment-tiers.md) | `edge`, `standard`, and `home` packs |
 | [Frigate](docs/integrations/frigate.md) | Snapshot URL ingest |
+| [Container image](docker/README.md) | Run the image, mounts, environment variables |
 | [Web UI](src/web/README.md) | Console development |
 
 ## License
