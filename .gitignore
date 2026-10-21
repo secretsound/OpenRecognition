@@ -17,8 +17,7 @@ data/
 *.key
 
 # Web
-web/node_modules/
-web/dist/
+src/web/node_modules/
 *.tsbuildinfo
 
 # Cursor

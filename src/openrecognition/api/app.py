@@ -107,7 +107,7 @@ def create_app() -> FastAPI:
     if settings.web_dist is not None:
         web_dist = settings.web_dist
     else:
-        web_dist = Path(__file__).resolve().parents[3] / "web" / "dist"
+        web_dist = Path(__file__).resolve().parents[2] / "web" / "dist"
     if settings.web_enabled and web_dist.is_dir():
         index_path = web_dist / "index.html"
         assets_dir = web_dist / "assets"
@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
             if not index_path.is_file():
                 raise HTTPException(
                     status_code=404,
-                    detail="Web UI not built — run: cd web && npm run build",
+                    detail="Web UI not built — run: cd src/web && npm run build",
                 )
             return FileResponse(index_path)
 

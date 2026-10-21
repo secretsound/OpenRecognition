@@ -17,7 +17,7 @@
       "type": "shell",
       "command": "npm run dev",
       "options": {
-        "cwd": "${workspaceFolder}/web"
+        "cwd": "${workspaceFolder}/src/web"
       },
       "isBackground": true,
       "problemMatcher": [],

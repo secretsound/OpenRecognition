@@ -45,7 +45,7 @@ From Python 3.12: `pip install -e .`, then `openrecognition bootstrap` and `open
 | [Architecture](docs/architecture.md) | How a request moves through the service |
 | [Deployment tiers](docs/deployment-tiers.md) | `edge`, `standard`, and `home` packs |
 | [Frigate](docs/integrations/frigate.md) | Snapshot URL ingest |
-| [Web UI](web/README.md) | Console development |
+| [Web UI](src/web/README.md) | Console development |
 
 ## License
 

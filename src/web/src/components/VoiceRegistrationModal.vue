@@ -348,7 +348,7 @@ const wizardSteps = computed(() => [
             style="margin-bottom: 16px"
           >
             This page is not a secure context. Run the UI with
-            <code>npm run dev</code> in <code>web/</code> and open
+            <code>npm run dev</code> in <code>src/web/</code> and open
             <strong>https://localhost:5173</strong> (not http:// on a remote host).
             Set <code>OPENRECOGNITION_WEB_ORIGIN=https://localhost:5173</code> on the API.
           </NAlert>

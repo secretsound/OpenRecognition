@@ -1,6 +1,6 @@
 # OpenRecognition Web UI
 
-Vue 3 + Naive UI admin console for enrollments, API keys, and webhooks. UI conventions: [../docs/ui-design.md](../docs/ui-design.md).
+Vue 3 + Naive UI admin console for enrollments, API keys, and webhooks. UI conventions: [../../docs/ui-design.md](../../docs/ui-design.md).
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Vue 3 + Naive UI admin console for enrollments, API keys, and webhooks. UI conve
 ## Development
 
 ```bash
-cd web
+cd src/web
 npm install --legacy-peer-deps
 export OPENRECOGNITION_WEB_ORIGIN=https://localhost:5173   # API env (HTTPS for mic)
 openrecognition serve   # separate terminal

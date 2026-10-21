@@ -16,5 +16,5 @@ build
 src/ha
 docs
 helm
-web/node_modules
+src/web/node_modules
 # README.md and tests are required for devcontainer / hatchling builds

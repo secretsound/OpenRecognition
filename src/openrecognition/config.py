@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     maintenance_mode: bool = False
     web_enabled: bool = True
     docs_enabled: bool = True
-    # Set in the container image. A source checkout resolves web/dist from the repo root.
+    # Set in the container image. A source checkout uses src/web/dist.
     web_dist: Path | None = None
     web_origin: str | None = None
     session_ttl_minutes: int = 60
