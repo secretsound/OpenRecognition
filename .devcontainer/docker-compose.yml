@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - ..:/workspace:cached
+      - openrecognition-data:/data
+    # Host network so Wyoming mDNS reaches Home Assistant on the LAN (Linux only).
+    # ports: are ignored in host mode — 8080 and 10301 bind on the host directly.
+    network_mode: host
+    environment:
+      OPENRECOGNITION_HOST: "0.0.0.0"
+      OPENRECOGNITION_PORT: "8080"
+      OPENRECOGNITION_DATA_DIR: "/data"
+      OPENRECOGNITION_MODEL_PACKS_DIR: "/workspace/model-packs"
+      OPENRECOGNITION_PACK: edge
+      OPENRECOGNITION_AUTH_REQUIRED: "true"
+      OPENRECOGNITION_WEB_ENABLED: "true"
+
+  # Optional: enable with `docker compose --profile mqtt up` from repo root
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: ["mqtt"]
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - openrecognition
+
+volumes:
+  openrecognition-data:
+
+networks:
+  openrecognition:
+    name: openrecognition

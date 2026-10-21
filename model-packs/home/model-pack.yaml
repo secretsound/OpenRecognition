@@ -1,0 +1,17 @@
+name: home
+version: "1"
+description: Home Assistant focused — gate, speaker, face, pets, sound events
+models:
+  silero_vad: optional
+  speaker_embedding: optional
+  face_embedding: optional
+  visual_reid: optional
+modalities:
+  - audio
+  - image
+features:
+  - audio_gate
+  - speaker_id
+  - face_id
+  - pet_identity
+  - sound_events

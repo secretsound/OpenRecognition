@@ -1,0 +1,46 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OpenRecognition API",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/usr/local/bin/python",
+      "module": "uvicorn",
+      "args": [
+        "openrecognition.api.app:create_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "--reload",
+        "--reload-dir",
+        "src"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OPENRECOGNITION_HOST": "0.0.0.0",
+        "OPENRECOGNITION_DATA_DIR": "/data",
+        "OPENRECOGNITION_MODEL_PACKS_DIR": "${workspaceFolder}/model-packs"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/usr/local/bin/python",
+      "module": "pytest",
+      "args": ["tests", "-v"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OPENRECOGNITION_DATA_DIR": "/data",
+        "OPENRECOGNITION_MODEL_PACKS_DIR": "${workspaceFolder}/model-packs"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

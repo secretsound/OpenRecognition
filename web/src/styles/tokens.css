@@ -1,0 +1,23 @@
+:root {
+  --or-page-gap: 24px;
+  --or-section-gap: 16px;
+  --or-inline-gap: 12px;
+
+  --or-layout-max: 1200px;
+
+  --or-page-bg-light: #f4f5f7;
+  --or-page-bg-dark: #0e0f12;
+  --or-sider-light: #ffffff;
+  --or-sider-dark: #14161a;
+  --or-card-border-light: rgba(15, 23, 42, 0.08);
+  --or-card-border-dark: rgba(255, 255, 255, 0.08);
+
+  --or-modality-audio: #36cfc9;
+  --or-modality-image: #7c5cff;
+  --or-modality-pet: #e8a317;
+  --or-modality-object: #8b9bb4;
+
+  --or-modal-max-width: 720px;
+  --or-modal-narrow: 440px;
+  --or-radius: 12px;
+}

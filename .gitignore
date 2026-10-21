@@ -1,0 +1,32 @@
+# ONNX weights (download with tools/download_models.py)
+model-packs/**/*.onnx
+
+# Python / tooling
+.venv
+venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Data / secrets
+data/
+*.key
+
+# Web
+web/node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Cursor
+.cursor/
+
+# Home Assistant custom component (kept locally, not part of this repo yet)
+src/ha/
+
+# Temporary files
+docs/
+helm/

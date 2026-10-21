@@ -1,0 +1,27 @@
+services:
+  openrecognition:
+    # A published release image, or the local tag produced by --build.
+    # OPENRECOGNITION_IMAGE=ghcr.io/<owner>/<repo>:0.1.0 docker compose up
+    image: ${OPENRECOGNITION_IMAGE:-openrecognition:local}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.edge
+    ports:
+      - "8080:8080"
+      - "10301:10301"
+    volumes:
+      # Named volumes by default. Set either path to a NAS share (or other host directory).
+      # OPENRECOGNITION_DATA_PATH=/mnt/nas/openrecognition/data
+      # OPENRECOGNITION_MODELS_PATH=/mnt/nas/openrecognition/models
+      - ${OPENRECOGNITION_DATA_PATH:-openrecognition-data}:/data
+      - ${OPENRECOGNITION_MODELS_PATH:-openrecognition-models}:/models
+    environment:
+      OPENRECOGNITION_HOST: "0.0.0.0"
+      OPENRECOGNITION_AUTH_REQUIRED: "true"
+      OPENRECOGNITION_PACK: edge
+      OPENRECOGNITION_WEB_ENABLED: "true"
+    restart: unless-stopped
+
+volumes:
+  openrecognition-data:
+  openrecognition-models:

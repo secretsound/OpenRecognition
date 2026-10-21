@@ -1,0 +1,21 @@
+name: edge
+version: "1"
+description: Test fixture pack (no ONNX files)
+models:
+  silero_vad:
+    file: silero_vad.onnx
+    version: silero-vad-v4
+  speaker_embedding:
+    file: speaker_embedding.onnx
+    version: wespeaker-small-int8
+    onnx:
+      sample_rate: 16000
+      min_samples: 4800
+      embed_dim: 192
+modalities:
+  - audio
+  - image
+approx_size_mb: 0
+features:
+  - audio_gate
+  - speaker_id

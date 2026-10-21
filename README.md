@@ -22,6 +22,8 @@ Docker is the fast way in. The first start writes an admin API key and a one-tim
 docker compose up --build
 ```
 
+The gallery stays in `/data` and model weights stay in `/models`. Either mount can be a NAS share; see [Deployment tiers](docs/deployment-tiers.md).
+
 A published GitHub release also pushes this image to GHCR. Pull a version with:
 
 ```bash
@@ -47,4 +49,4 @@ From Python 3.12: `pip install -e .`, then `openrecognition bootstrap` and `open
 
 ## License
 
-Apache License 2.0 (`pyproject.toml`). ONNX weights you download stay under their upstream licenses; see [docs/models.md](docs/models.md).
+Apache License 2.0. See [LICENSE](LICENSE). ONNX weights you download stay under their upstream licenses; see [docs/models.md](docs/models.md).

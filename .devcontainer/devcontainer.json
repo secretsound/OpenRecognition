@@ -1,0 +1,51 @@
+{
+  "name": "OpenRecognition",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+  "forwardPorts": [5173, 1883],
+  "portsAttributes": {
+    "8080": {
+      "label": "OpenRecognition API & docs (/docs, /redoc)",
+      "onAutoForward": "ignore"
+    },
+    "10301": {
+      "label": "Wyoming speaker-proxy (Home Assistant Assist STT)",
+      "onAutoForward": "ignore"
+    },
+    "5173": {
+      "label": "Vue web UI (Vite dev)",
+      "onAutoForward": "notify"
+    },
+    "1883": {
+      "label": "MQTT (optional profile)",
+      "onAutoForward": "silent"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        },
+        "editor.formatOnSave": true,
+        "files.watcherExclude": {
+          "**/.venv/**": true,
+          "**/__pycache__/**": true,
+          "**/data/**": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+name: standard
+version: "1"
+description: Balanced accuracy for NUC-class hardware
+models:
+  silero_vad:
+    file: silero_vad.onnx
+    version: silero-vad-v4
+  audio_gate_classifier:
+    file: audio_gate_classifier.onnx
+    version: yamnet-v1
+    onnx:
+      sample_rate: 16000
+      backend: yamnet
+  speaker_embedding:
+    file: speaker_embedding.onnx
+    version: wespeaker-resnet34-v1
+    onnx:
+      preprocessor: wespeaker_fbank
+      sample_rate: 16000
+      num_mel_bins: 80
+      max_seconds: 15
+      embed_dim: 256
+  face_detector:
+    file: face_detector.onnx
+    version: scrfd-500m
+    onnx:
+      input_size: 640
+      conf_thres: 0.5
+  face_embedding:
+    file: face_embedding.onnx
+    version: w600k-mbf-v1
+    onnx:
+      input_size: 112
+      embed_dim: 512
+      input_norm: insightface
+  animal_detector:
+    file: animal_detector.onnx
+    version: yolo11n
+    onnx:
+      input_size: 640
+      conf_thres: 0.25
+  visual_reid:
+    file: visual_reid.onnx
+    version: mobilenetv2-int8-v1
+    onnx:
+      backend: classifier
+      input_size: 224
+      embed_dim: 1000
+      input_norm: imagenet
+modalities:
+  - audio
+  - image
+  - video
+approx_size_mb: 200
+features:
+  - audio_gate
+  - speaker_id
+  - face_id
+  - pet_identity
+  - object_identity
+  - sound_events

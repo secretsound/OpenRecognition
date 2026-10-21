@@ -1,0 +1,41 @@
+# Build Vue admin UI
+FROM node:22-alpine AS web-builder
+WORKDIR /build
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+COPY web/ ./
+RUN npm run build
+
+# Python API + static UI
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends libsndfile1 ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src/
+COPY model-packs ./model-packs/
+COPY --from=web-builder /build/dist ./web/dist/
+
+RUN pip install --no-cache-dir . \
+    && python -c "import uvicorn, fastapi, onnxruntime; import openrecognition; print('build ok')"
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV OPENRECOGNITION_HOST=0.0.0.0 \
+    OPENRECOGNITION_PORT=8080 \
+    OPENRECOGNITION_PACK=edge \
+    OPENRECOGNITION_DATA_DIR=/data \
+    OPENRECOGNITION_MODEL_PACKS_DIR=/models \
+    OPENRECOGNITION_SHIPPED_PACKS_DIR=/app/model-packs \
+    OPENRECOGNITION_WEB_DIST=/app/web/dist
+
+VOLUME /data /models
+# EXPOSE documents ports; publish them at run time (e.g. docker compose ports: 8080, 10301).
+EXPOSE 8080 10301/tcp
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["openrecognition", "serve"]

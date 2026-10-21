@@ -1,0 +1,28 @@
+openapi: 3.1.0
+info:
+  title: OpenRecognition
+  version: 0.1.0
+  description: Multi-modal recognition API
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /health:
+    get:
+      summary: Health check
+  /v1/capabilities:
+    get:
+      summary: Service capabilities
+  /v1/audio/gate:
+    post:
+      summary: Audio pipeline gate
+  /v1/recognize/audio:
+    post:
+      summary: Audio recognition
+  /v1/recognize/image:
+    post:
+      summary: Image recognition
+  /v1/enrollments:
+    get:
+      summary: List enrollments
+    post:
+      summary: Create enrollment
