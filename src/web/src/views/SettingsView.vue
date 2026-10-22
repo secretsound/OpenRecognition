@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
-  NCard,
-  NTabs,
-  NTabPane,
   NSelect,
   NSwitch,
   NButton,
   NSpace,
   NDescriptions,
   NDescriptionsItem,
-  NSkeleton,
   NInputNumber,
   NSlider,
   NAlert,
@@ -24,49 +20,39 @@ import type { SelectOption } from "naive-ui";
 import { PowerOutline, CopyOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
 import type { AppSettingsOut, ServiceRestartOut } from "@/types/api";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import SegmentedControl from "@/components/kit/SegmentedControl.vue";
+import StickySaveBar from "@/components/kit/StickySaveBar.vue";
+import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";
 import SettingRow from "@/components/settings/SettingRow.vue";
 import { ApiError } from "@/api/client";
 import { featureFlagEntries } from "@/utils/featureFlags";
 import { useTheme } from "@/composables/useTheme";
-import { accentPresets, type AccentPresetId } from "@/styles/theme";
-import { webUiVersion, nodeVersion, npmVersion } from "@/buildInfo";
+import { useUnsavedGuard } from "@/composables/useUnsaved";
+import { webUiVersion, buildRuntime } from "@/buildInfo";
 import { ensureSystemInfo, lanApiUrls as buildLanUrls } from "@/utils/settingsSystem";
 
 const message = useMessage();
 const router = useRouter();
-const { mode, setTheme, accentId, setAccent, accentOptions } = useTheme();
+const { mode, setTheme, accentId, setAccent, accentOptions, themeModeOptions } = useTheme();
+
+type SettingsTab = "appearance" | "recognition" | "security" | "system" | "advanced";
+const settingsTabs: { value: SettingsTab; label: string }[] = [
+  { value: "appearance", label: "Appearance" },
+  { value: "recognition", label: "Recognition" },
+  { value: "security", label: "Security" },
+  { value: "system", label: "System" },
+  { value: "advanced", label: "Advanced" },
+];
 
 const loading = ref(true);
 const loadError = ref<string | null>(null);
 const saving = ref(false);
 const restarting = ref(false);
 const settings = ref<AppSettingsOut | null>(null);
-const activeTab = ref("appearance");
-
-function renderAccentLabel(option: SelectOption) {
-  const id = option.value as AccentPresetId;
-  const color = accentPresets[id]?.primary ?? "#888";
-  return h(
-    "span",
-    { style: "display: inline-flex; align-items: center; gap: 8px;" },
-    [
-      h("span", {
-        style: {
-          width: "12px",
-          height: "12px",
-          borderRadius: "3px",
-          background: color,
-          flexShrink: "0",
-          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.15)",
-        },
-      }),
-      option.label as string,
-    ],
-  );
-}
+const activeTab = ref<SettingsTab>("appearance");
 
 const draft = ref({
   maintenance_mode: false,
@@ -268,24 +254,27 @@ function resetDraft() {
   if (settings.value) applyFromServer(settings.value);
 }
 
+useUnsavedGuard(dirty);
+
 onMounted(load);
 </script>
 
 <template>
-  <div class="settings-page">
-    <AppPageHeader
+  <div class="or-page or-page--prose">
+    <PageHeader
       title="Settings"
       description="Appearance, recognition defaults, who can sign in, and how this server is running."
     >
-      <template #action>
-        <NButton v-if="dirty" @click="resetDraft">Discard</NButton>
-        <NButton type="primary" :loading="saving" :disabled="!dirty" @click="save">
-          Save
-        </NButton>
+      <template #tabs>
+        <SegmentedControl
+          v-model="activeTab"
+          aria-label="Settings sections"
+          :options="settingsTabs"
+        />
       </template>
-    </AppPageHeader>
+    </PageHeader>
 
-    <NSkeleton v-if="loading && !settings" text :repeat="10" />
+    <ContentSkeleton v-if="loading && !settings" variant="detail" />
     <EmptyState
       v-else-if="loadError && !settings"
       title="Couldn't load settings"
@@ -295,48 +284,39 @@ onMounted(load);
     />
 
     <template v-else-if="settings && system">
-      <NCard :bordered="false" class="settings-shell">
-        <NTabs v-model:value="activeTab" type="line" animated class="settings-tabs">
-          <NTabPane name="appearance" tab="Appearance">
-            <div class="tab-panel">
+      <section v-if="activeTab === 'appearance'" class="tab-panel">
               <SettingsSection title="Theme">
                 <SettingRow label="Color mode">
-                  <NSpace :size="8">
-                    <NButton
-                      :secondary="mode === 'light'"
-                      :quaternary="mode !== 'light'"
-                      @click="setTheme('light')"
-                    >
-                      Light
-                    </NButton>
-                    <NButton
-                      :secondary="mode === 'dark'"
-                      :quaternary="mode !== 'dark'"
-                      @click="setTheme('dark')"
-                    >
-                      Dark
-                    </NButton>
-                  </NSpace>
-                  <template #hint>Stored in this browser for your next visit.</template>
+                  <SegmentedControl
+                    :model-value="mode"
+                    :options="themeModeOptions"
+                    aria-label="Color mode"
+                    @update:model-value="setTheme"
+                  />
+                  <template #hint>Stored in this browser. System follows the OS.</template>
                 </SettingRow>
                 <SettingRow label="Accent">
-                  <NSelect
-                    :value="accentId"
-                    :options="accentOptions"
-                    :render-label="renderAccentLabel"
-                    style="width: 220px"
-                    @update:value="(v: AccentPresetId) => setAccent(v)"
-                  />
+                  <div class="accent-swatches">
+                    <button
+                      v-for="opt in accentOptions"
+                      :key="opt.value"
+                      type="button"
+                      class="swatch"
+                      :class="{ 'is-active': accentId === opt.value }"
+                      :style="{ background: opt.color }"
+                      :aria-label="opt.label"
+                      :title="opt.label"
+                      @click="setAccent(opt.value)"
+                    />
+                  </div>
                   <template #hint>
                     Buttons, links, navigation, and the sidebar logo.
                   </template>
                 </SettingRow>
               </SettingsSection>
-            </div>
-          </NTabPane>
+      </section>
 
-          <NTabPane name="recognition" tab="Recognition">
-            <div class="tab-panel">
+      <section v-if="activeTab === 'recognition'" class="tab-panel">
               <SettingsSection
                 title="Defaults"
                 description="Used when a request does not set its own options."
@@ -394,11 +374,9 @@ onMounted(load);
                   <template #hint>How long Activity keeps events. View them on the Activity page.</template>
                 </SettingRow>
               </SettingsSection>
-            </div>
-          </NTabPane>
+      </section>
 
-          <NTabPane name="security" tab="Security">
-            <div class="tab-panel">
+      <section v-if="activeTab === 'security'" class="tab-panel">
               <SettingsSection title="Sessions & limits">
                 <SettingRow label="Web session lifetime">
                   <NSpace align="center" :size="8">
@@ -429,11 +407,9 @@ onMounted(load);
                   </template>
                 </SettingRow>
               </SettingsSection>
-            </div>
-          </NTabPane>
+      </section>
 
-          <NTabPane name="system" tab="System">
-            <div class="tab-panel">
+      <section v-if="activeTab === 'system'" class="tab-panel">
               <NAlert type="info" :bordered="false" class="system-warn">
                 Saved changes are stored in
                 <code>{{ settings.runtime_settings_path || "data/runtime_settings.json" }}</code>.
@@ -497,11 +473,8 @@ onMounted(load);
                     <NDescriptionsItem label="Web UI">
                       {{ webUiVersion }}
                     </NDescriptionsItem>
-                    <NDescriptionsItem label="npm">
-                      {{ npmVersion }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Node">
-                      {{ nodeVersion }}
+                    <NDescriptionsItem label="Built with">
+                      {{ buildRuntime }}
                     </NDescriptionsItem>
                     <NDescriptionsItem label="Platform">
                       <span class="mono">{{ system.platform }}</span>
@@ -567,8 +540,8 @@ onMounted(load);
 
                 <SettingsSection title="Deployment">
                   <NDescriptions :column="1" label-placement="left" size="small">
-                    <NDescriptionsItem label="Model pack">
-                      <NTag size="small" round :bordered="false" type="info">{{ settings.pack }}</NTag>
+                    <NDescriptionsItem label="Hardware">
+                      <NTag size="small" round :bordered="false" type="info">{{ settings.hardware.label }}</NTag>
                     </NDescriptionsItem>
                     <NDescriptionsItem label="Auth">
                       {{ settings.auth_required ? "Required" : "Off" }}
@@ -576,8 +549,8 @@ onMounted(load);
                     <NDescriptionsItem label="Data">
                       <span class="mono">{{ settings.data_dir }}</span>
                     </NDescriptionsItem>
-                    <NDescriptionsItem label="Model packs">
-                      <span class="mono">{{ settings.model_packs_dir }}</span>
+                    <NDescriptionsItem label="Models">
+                      <span class="mono">{{ settings.models_dir }}</span>
                     </NDescriptionsItem>
                     <NDescriptionsItem label="Web UI">
                       {{ settings.web_enabled ? "Enabled" : "Disabled" }}
@@ -619,17 +592,15 @@ onMounted(load);
                     </NTag>
                   </NSpace>
                   <p class="env-examples">
-                    <code>OPENRECOGNITION_PACK=edge</code>
+                    <code>OPENRECOGNITION_MODELS_DIR=./models</code>
                     <code>OPENRECOGNITION_HOST=0.0.0.0</code>
                     <code>OPENRECOGNITION_PORT=8080</code>
                   </p>
                 </SettingsSection>
               </div>
-            </div>
-          </NTabPane>
+      </section>
 
-          <NTabPane name="advanced" tab="Advanced">
-            <div class="tab-panel">
+      <section v-if="activeTab === 'advanced'" class="tab-panel">
               <SettingsSection
                 title="Recognition paths"
                 description="Turn individual ways of recognizing on or off."
@@ -646,42 +617,14 @@ onMounted(load);
                   <template v-if="row.description" #hint>{{ row.description }}</template>
                 </SettingRow>
               </SettingsSection>
-            </div>
-          </NTabPane>
-        </NTabs>
-      </NCard>
+      </section>
+      <StickySaveBar :dirty="dirty" :saving="saving" @save="save" @discard="resetDraft" />
     </template>
   </div>
 </template>
 
 <style scoped>
-.settings-page {
-  max-width: 920px;
-}
-
-.settings-banner {
-  margin-bottom: 16px;
-}
-
-.settings-banner code {
-  font-size: 0.75rem;
-}
-
-.settings-shell {
-  border-radius: 12px;
-  border: 1px solid var(--n-border-color);
-}
-
-.settings-tabs :deep(.n-tabs-nav) {
-  padding: 0 4px;
-}
-
-.settings-tabs :deep(.n-tab-pane) {
-  padding: 0;
-}
-
 .tab-panel {
-  padding: 20px 4px 8px;
   max-width: 640px;
 }
 
@@ -709,6 +652,25 @@ onMounted(load);
 
 .slider-wrap {
   width: 220px;
+}
+
+.accent-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch.is-active {
+  box-shadow: 0 0 0 2px var(--or-surface), 0 0 0 4px var(--or-accent);
 }
 
 .pipeline-row {

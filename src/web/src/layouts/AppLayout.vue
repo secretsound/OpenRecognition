@@ -1,56 +1,58 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from "vue";
+import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NLayout,
-  NLayoutHeader,
   NLayoutSider,
   NLayoutContent,
   NMenu,
   NButton,
-  NTag,
   NDropdown,
   NDrawer,
   NIcon,
-  NSpace,
-  NBreadcrumb,
-  NBreadcrumbItem,
   NTooltip,
 } from "naive-ui";
 import type { MenuOption } from "naive-ui";
 import {
   HomeOutline,
   PeopleOutline,
-  CameraOutline,
+  ScanOutline,
   PulseOutline,
   LinkOutline,
   PeopleCircleOutline,
   KeyOutline,
   SettingsOutline,
   HardwareChipOutline,
-  SunnyOutline,
-  MoonOutline,
-  MenuOutline,
   LogOutOutline,
   ChevronBackOutline,
+  SearchOutline,
+  EllipsisHorizontalOutline,
 } from "@vicons/ionicons5";
 import { api } from "@/api/client";
 import { useAuth } from "@/composables/useAuth";
 import { useTheme } from "@/composables/useTheme";
 import { useSiderCollapsed } from "@/composables/useSiderCollapsed";
 import { provideBreadcrumbTail } from "@/composables/useBreadcrumbTail";
+import { useBreakpoint } from "@/composables/useBreakpoint";
+import { useConditions } from "@/composables/useConditions";
 import type { CapabilitiesOut } from "@/types/api";
+import { canAdmin } from "@/utils/roles";
 import LogoMark from "@/components/LogoMark.vue";
+import CommandPalette from "@/components/kit/CommandPalette.vue";
+import ConditionBanner from "@/components/kit/ConditionBanner.vue";
+import ProfileMark from "@/components/kit/ProfileMark.vue";
 
 const route = useRoute();
 const router = useRouter();
 const { username, role, logout, clearSession } = useAuth();
-const { isDark, toggle } = useTheme();
+const { isDark, setTheme, mode } = useTheme();
 const { collapsed, setCollapsed, restoreDesktopPreference } = useSiderCollapsed();
-
-const mobileOpen = ref(false);
+const { isMobile } = useBreakpoint();
 const capabilities = ref<CapabilitiesOut | null>(null);
-const isMobile = ref(false);
+const { items: conditions } = useConditions(capabilities);
+const dismissed = ref<string[]>([]);
+const paletteOpen = ref(false);
+const moreOpen = ref(false);
 const { tail: breadcrumbTail, override: breadcrumbOverride } = provideBreadcrumbTail();
 
 function menuIcon(Icon: typeof PeopleOutline) {
@@ -58,36 +60,26 @@ function menuIcon(Icon: typeof PeopleOutline) {
 }
 
 const menuOptions = computed<MenuOption[]>(() => {
-  const recognize: MenuOption[] = [
-    { label: "Home", key: "/", icon: menuIcon(HomeOutline) },
+  const use: MenuOption[] = [
+    { label: "Overview", key: "/", icon: menuIcon(HomeOutline) },
     { label: "Library", key: "/enrollments", icon: menuIcon(PeopleOutline) },
-    { label: "Try a match", key: "/test", icon: menuIcon(CameraOutline) },
-  ];
-  const manage: MenuOption[] = [
+    { label: "Recognize", key: "/test", icon: menuIcon(ScanOutline) },
     { label: "Activity", key: "/logs", icon: menuIcon(PulseOutline) },
+  ];
+  const setup: MenuOption[] = [
     { label: "Connections", key: "/integrations", icon: menuIcon(LinkOutline) },
     { label: "Users", key: "/users", icon: menuIcon(PeopleCircleOutline) },
     { label: "API keys", key: "/keys", icon: menuIcon(KeyOutline) },
   ];
-  if (role.value === "admin") {
-    manage.push({
-      label: "Models",
-      key: "/models",
-      icon: menuIcon(HardwareChipOutline),
-    });
+  if (canAdmin(role.value)) {
+    setup.push({ label: "Models", key: "/models", icon: menuIcon(HardwareChipOutline) });
   }
-  manage.push({
-    label: "Settings",
-    key: "/settings",
-    icon: menuIcon(SettingsOutline),
-  });
+  setup.push({ label: "Settings", key: "/settings", icon: menuIcon(SettingsOutline) });
 
-  if (collapsed.value) {
-    return [...recognize, ...manage];
-  }
+  if (collapsed.value) return [...use, ...setup];
   return [
-    { type: "group", label: "Recognize", key: "group-recognize", children: recognize },
-    { type: "group", label: "Manage", key: "group-manage", children: manage },
+    { type: "group", label: "Use", key: "group-use", children: use },
+    { type: "group", label: "Set up", key: "group-setup", children: setup },
   ];
 });
 
@@ -121,9 +113,6 @@ const showBreadcrumbs = computed(() => headerBreadcrumbs.value.length >= 2);
 const headerBackTo = computed(() => {
   const explicit = route.meta.backTo as string | undefined;
   if (explicit) return explicit;
-  if (route.name === "enrollment-training" && route.params.id) {
-    return `/enrollments/${route.params.id}`;
-  }
   if (breadcrumbOverride.value && breadcrumbOverride.value.length >= 2) {
     const parent = breadcrumbOverride.value[breadcrumbOverride.value.length - 2];
     if (parent.to) return parent.to;
@@ -133,190 +122,237 @@ const headerBackTo = computed(() => {
   return crumbs[0].to ?? null;
 });
 
-const headerBackLabel = computed(
-  () => route.meta.breadcrumbs?.[0]?.label ?? "Back",
+const visibleConditions = computed(() =>
+  conditions.value.filter((c) => !dismissed.value.includes(c.id)),
 );
 
-const packTooltip = computed(() => {
-  if (!capabilities.value) return "";
-  const models = Object.keys(capabilities.value.models ?? {}).join(", ") || "—";
-  return `Active pack: ${capabilities.value.pack}\nModels: ${models}`;
-});
-
-const userOptions = [
+const userOptions = computed(() => [
+  { label: "Light", key: "theme-light" },
+  { label: "Dark", key: "theme-dark" },
+  { label: "System", key: "theme-system" },
+  { type: "divider", key: "d1" },
+  { label: "API docs", key: "docs" },
+  { type: "divider", key: "d2" },
   {
-    label: "Logout",
+    label: "Sign out",
     key: "logout",
     icon: () => h(NIcon, null, { default: () => h(LogOutOutline) }),
   },
+]);
+
+const mobileTabs = [
+  { key: "/", label: "Overview", icon: HomeOutline },
+  { key: "/enrollments", label: "Library", icon: PeopleOutline },
+  { key: "/test", label: "Recognize", icon: ScanOutline },
+  { key: "/logs", label: "Activity", icon: PulseOutline },
 ];
 
 function onMenuSelect(key: string) {
-  router.push(key);
-  mobileOpen.value = false;
+  void router.push(key);
+  moreOpen.value = false;
 }
 
 async function handleUserAction(key: string) {
   if (key === "logout") {
     await logout();
-    router.push("/login");
+    void router.push("/login");
+    return;
+  }
+  if (key === "docs") {
+    window.open("/docs", "_blank", "noopener");
+    return;
+  }
+  if (key.startsWith("theme-")) {
+    setTheme(key.replace("theme-", "") as "light" | "dark" | "system");
   }
 }
 
-onMounted(async () => {
-  const mq = window.matchMedia("(max-width: 768px)");
-  const update = () => {
-    isMobile.value = mq.matches;
-    if (mq.matches) {
-      setCollapsed(true, false);
-    } else {
-      restoreDesktopPreference();
-    }
-  };
-  update();
-  mq.addEventListener("change", update);
+function onHotkey(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null;
+  const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+  if (typing) return;
+  if (e.key === "n") void router.push("/enrollments/new");
+  if (e.key === "r") void router.push("/test");
+}
+
+async function loadCapabilities() {
   try {
     capabilities.value = await api<CapabilitiesOut>("/v1/capabilities");
   } catch {
     clearSession();
-    router.push("/login");
+    void router.push("/login");
   }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onHotkey);
+  window.addEventListener("or-hardware-changed", loadCapabilities);
+  if (isMobile.value) setCollapsed(true, false);
+  void loadCapabilities();
 });
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", onHotkey);
+  window.removeEventListener("or-hardware-changed", loadCapabilities);
+});
+
+function onBreakpoint() {
+  if (isMobile.value) setCollapsed(true, false);
+  else restoreDesktopPreference();
+}
+
+watch(isMobile, onBreakpoint, { immediate: true });
 </script>
 
 <template>
-  <NLayout has-sider class="app-shell" :class="{ dark: isDark }">
+  <NLayout has-sider class="app-shell" :class="{ dark: isDark, 'is-mobile': isMobile }">
     <NLayoutSider
       v-if="!isMobile"
-      bordered
       collapse-mode="width"
-      :collapsed-width="64"
-      :width="240"
-      v-model:collapsed="collapsed"
+      :collapsed-width="60"
+      :width="248"
+      :collapsed="collapsed"
       show-trigger
       class="app-sider"
+      @update:collapsed="setCollapsed"
     >
       <div class="sider-inner">
         <div class="sider-brand" :class="{ collapsed }">
-          <LogoMark :size="32" class="logo" />
+          <LogoMark :size="28" class="logo" />
           <span v-if="!collapsed" class="brand-name">OpenRecognition</span>
         </div>
         <NMenu
           class="sider-menu"
           :value="activeKey"
           :collapsed="collapsed"
-          :collapsed-width="64"
+          :collapsed-width="60"
           :options="menuOptions"
           @update:value="onMenuSelect"
         />
-        <div v-if="capabilities" class="sider-footer" :class="{ collapsed }">
-          <NTooltip trigger="hover" :disabled="!collapsed">
+        <div class="sider-account" :class="{ collapsed }">
+          <NDropdown :options="userOptions" trigger="click" @select="handleUserAction">
+            <button type="button" class="account-btn" :aria-label="username ?? 'Account'">
+              <ProfileMark :label="username ?? 'User'" size="sm" />
+              <span v-if="!collapsed" class="account-meta">
+                <span class="account-name">{{ username ?? "User" }}</span>
+                <span class="account-role">{{ role }} · {{ mode }}</span>
+              </span>
+            </button>
+          </NDropdown>
+          <p v-if="capabilities && !collapsed" class="sider-status">
+            {{ capabilities.hardware.label }} · v{{ capabilities.version }}
+          </p>
+          <NTooltip v-else-if="capabilities" trigger="hover">
             <template #trigger>
-              <NTag size="small" :bordered="false" type="success" class="sider-pack-tag">
-                <span v-if="collapsed" class="sider-pack-short">{{
-                  capabilities.pack.slice(0, 1)
-                }}</span>
-                <span v-else>{{ capabilities.pack }} pack</span>
-              </NTag>
+              <p class="sider-status sider-status--collapsed">{{ capabilities.hardware.label.slice(0, 1) }}</p>
             </template>
-            {{ packTooltip }}
-          </NTooltip>
-          <span v-if="!collapsed" class="sider-version">v{{ capabilities.version }}</span>
-          <NTooltip v-else trigger="hover">
-            <template #trigger>
-              <span class="sider-version sider-version--collapsed">v{{ capabilities.version }}</span>
-            </template>
-            OpenRecognition v{{ capabilities.version }}
+            {{ capabilities.hardware.label }} · v{{ capabilities.version }}
           </NTooltip>
         </div>
       </div>
     </NLayoutSider>
 
-    <NDrawer v-model:show="mobileOpen" :width="260" placement="left">
-      <div class="drawer-inner">
-        <div class="sider-brand">
-          <LogoMark :size="32" class="logo" />
-          <span class="brand-name">OpenRecognition</span>
-        </div>
+    <NDrawer v-model:show="moreOpen" :width="280" placement="bottom" class="more-drawer">
+      <div class="more-sheet">
+        <p class="or-caps">More</p>
         <NMenu :value="activeKey" :options="menuOptions" @update:value="onMenuSelect" />
-        <div v-if="capabilities" class="sider-footer">
-          <NTooltip trigger="hover">
-            <template #trigger>
-              <NTag size="small" :bordered="false" type="success">
-                {{ capabilities.pack }} pack
-              </NTag>
-            </template>
-            {{ packTooltip }}
-          </NTooltip>
-          <span class="sider-version">v{{ capabilities.version }}</span>
-        </div>
+        <NDropdown :options="userOptions" trigger="click" @select="handleUserAction">
+          <button type="button" class="account-btn">
+            <ProfileMark :label="username ?? 'User'" size="sm" />
+            <span class="account-meta">
+              <span class="account-name">{{ username ?? "User" }}</span>
+              <span class="account-role">{{ role }}</span>
+            </span>
+          </button>
+        </NDropdown>
       </div>
     </NDrawer>
 
     <NLayout class="app-main">
-      <NLayoutHeader bordered class="app-header">
-        <NSpace align="center" :size="12" class="header-left">
-          <NButton
-            v-if="isMobile"
-            quaternary
-            circle
-            aria-label="Open menu"
-            @click="mobileOpen = true"
-          >
-            <template #icon>
-              <NIcon><MenuOutline /></NIcon>
-            </template>
-          </NButton>
+      <header v-if="showBreadcrumbs || !isMobile" class="app-topbar">
+        <div class="topbar-left">
           <NButton
             v-if="headerBackTo"
             quaternary
             circle
-            class="header-back"
-            :aria-label="`Back to ${headerBackLabel}`"
+            :aria-label="'Back'"
             @click="router.push(headerBackTo)"
           >
             <template #icon>
               <NIcon><ChevronBackOutline /></NIcon>
             </template>
           </NButton>
-          <NBreadcrumb v-if="showBreadcrumbs" class="header-breadcrumb">
-            <NBreadcrumbItem
-              v-for="(crumb, i) in headerBreadcrumbs"
-              :key="i"
-              :clickable="!!crumb.to && i < headerBreadcrumbs.length - 1"
-              @click="crumb.to && i < headerBreadcrumbs.length - 1 ? router.push(crumb.to) : undefined"
-            >
-              {{ crumb.label }}
-            </NBreadcrumbItem>
-          </NBreadcrumb>
-        </NSpace>
-        <NSpace align="center" :size="8">
-          <NButton
-            quaternary
-            circle
-            :aria-label="isDark ? 'Light mode' : 'Dark mode'"
-            @click="toggle"
-          >
-            <template #icon>
-              <NIcon><component :is="isDark ? SunnyOutline : MoonOutline" /></NIcon>
+          <nav v-if="showBreadcrumbs" class="crumbs" aria-label="Breadcrumb">
+            <template v-for="(crumb, i) in headerBreadcrumbs" :key="i">
+              <span v-if="i > 0" class="crumbs__sep">/</span>
+              <button
+                v-if="crumb.to && i < headerBreadcrumbs.length - 1"
+                type="button"
+                class="crumbs__link"
+                @click="router.push(crumb.to)"
+              >
+                {{ crumb.label }}
+              </button>
+              <span v-else class="crumbs__now">{{ crumb.label }}</span>
             </template>
-          </NButton>
-          <a href="/docs" target="_blank" rel="noopener" class="header-link">API</a>
-          <NDropdown :options="userOptions" @select="handleUserAction">
-            <NButton quaternary>{{ username ?? "User" }}</NButton>
-          </NDropdown>
-        </NSpace>
-      </NLayoutHeader>
-      <NLayoutContent class="app-page-bg" :class="{ dark: isDark }">
+          </nav>
+        </div>
+        <NButton
+          v-if="!isMobile"
+          quaternary
+          size="small"
+          aria-label="Search"
+          @click="paletteOpen = true"
+        >
+          <template #icon>
+            <NIcon><SearchOutline /></NIcon>
+          </template>
+          <span class="search-hint">Search</span>
+          <kbd class="search-kbd">⌘K</kbd>
+        </NButton>
+      </header>
+
+      <NLayoutContent
+        class="app-page-bg"
+        :class="{ 'app-page-bg--contained': route.name === 'logs' }"
+      >
         <div class="content-container">
-          <RouterView v-slot="{ Component }">
-            <Transition name="fade" mode="out-in">
-              <component :is="Component" />
-            </Transition>
-          </RouterView>
+          <ConditionBanner :items="visibleConditions" @dismiss="dismissed.push($event)" />
+          <div class="page-slot">
+            <RouterView v-slot="{ Component }">
+              <Transition name="or-fade" mode="out-in">
+                <component :is="Component" />
+              </Transition>
+            </RouterView>
+          </div>
         </div>
       </NLayoutContent>
     </NLayout>
+
+    <nav v-if="isMobile" class="bottom-bar" aria-label="Primary">
+      <button
+        v-for="tab in mobileTabs"
+        :key="tab.key"
+        type="button"
+        class="bottom-bar__item"
+        :class="{ 'is-active': activeKey === tab.key }"
+        @click="router.push(tab.key)"
+      >
+        <NIcon :size="20" :component="tab.icon" />
+        <span>{{ tab.label }}</span>
+      </button>
+      <button
+        type="button"
+        class="bottom-bar__item"
+        :class="{ 'is-active': moreOpen }"
+        @click="moreOpen = true"
+      >
+        <NIcon :size="20"><EllipsisHorizontalOutline /></NIcon>
+        <span>More</span>
+      </button>
+    </nav>
+
+    <CommandPalette v-model:show="paletteOpen" />
   </NLayout>
 </template>
 
@@ -327,7 +363,10 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-/* has-sider: keep sider + main in one flex row (requires static sider, not absolute) */
+.app-shell.is-mobile {
+  padding-bottom: calc(var(--or-bottombar-h) + env(safe-area-inset-bottom));
+}
+
 .app-shell > :deep(.n-layout-scroll-container) {
   display: flex;
   flex-wrap: nowrap;
@@ -337,6 +376,7 @@ onMounted(async () => {
 
 .app-sider {
   flex-shrink: 0;
+  border-right: 1px solid var(--or-line);
 }
 
 .app-sider :deep(.n-layout-sider-scroll-container) {
@@ -345,61 +385,94 @@ onMounted(async () => {
   height: 100%;
 }
 
-.sider-inner,
-.drawer-inner {
+.sider-inner {
   display: flex;
   flex-direction: column;
   min-height: 100%;
   height: 100%;
 }
 
-.drawer-inner {
-  min-height: 100vh;
-  padding-bottom: 16px;
-}
-
 .sider-menu {
   flex: 1;
   min-height: 0;
+  padding: 4px 8px;
 }
 
-.sider-footer {
-  flex-shrink: 0;
+.sider-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 16px 12px;
+}
+
+.sider-brand.collapsed {
+  justify-content: center;
+  padding: 20px 8px 12px;
+}
+
+.brand-name {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.sider-account {
   margin-top: auto;
-  padding: 12px 16px 16px;
-  border-top: 1px solid var(--n-border-color);
+  padding: 12px;
+  border-top: 1px solid var(--or-line);
+}
+
+.sider-account.collapsed {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.sider-footer.collapsed {
   align-items: center;
-  padding: 12px 8px 16px;
 }
 
-.sider-pack-tag {
-  max-width: 100%;
+.account-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--or-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 
-.sider-pack-short {
+.account-btn:hover {
+  background: var(--or-hover);
+}
+
+.account-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-name {
   font-weight: 600;
+  font-size: var(--or-text-small);
+}
+
+.account-role {
+  font-size: var(--or-text-micro);
+  color: var(--or-text-3);
+  text-transform: capitalize;
+}
+
+.sider-status {
+  margin: 8px 6px 0;
+  font-size: var(--or-text-micro);
+  color: var(--or-text-3);
+}
+
+.sider-status--collapsed {
   text-transform: uppercase;
-}
-
-.sider-version {
-  font-size: 0.75rem;
-  color: var(--n-text-color-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.sider-version--collapsed {
-  font-size: 0.65rem;
-  max-width: 48px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
 }
 
 .app-main {
@@ -417,10 +490,67 @@ onMounted(async () => {
   min-height: 0;
 }
 
-.app-header {
+.app-topbar {
   flex-shrink: 0;
-  z-index: 2;
-  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: var(--or-topbar-h);
+  padding: 0 var(--or-page-x);
+  border-bottom: 1px solid var(--or-line);
+  background: var(--or-surface);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--or-text-small);
+  color: var(--or-text-3);
+}
+
+.crumbs__link {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--or-text-3);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.crumbs__link:hover,
+.crumbs__now {
+  color: var(--or-text-1);
+}
+
+.crumbs__now {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-hint {
+  margin-right: 8px;
+}
+
+.search-kbd {
+  font-family: var(--or-font-sans);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--or-surface-sunken);
+  color: var(--or-text-3);
 }
 
 .app-page-bg {
@@ -430,64 +560,74 @@ onMounted(async () => {
   overflow-x: hidden;
 }
 
-.app-page-bg :deep(.n-layout-scroll-container) {
-  min-height: min-content;
+.app-page-bg--contained {
+  overflow: hidden;
 }
 
-.sider-brand {
+.app-page-bg--contained :deep(.n-layout-scroll-container) {
+  height: 100%;
+  overflow: hidden;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 20px 16px;
-  font-weight: 600;
-  font-size: 1rem;
+  flex-direction: column;
 }
 
-.sider-brand.collapsed {
+.app-page-bg--contained .content-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-page-bg--contained .page-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  height: calc(var(--or-bottombar-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--or-surface);
+  border-top: 1px solid var(--or-line);
+}
+
+.bottom-bar__item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  padding: 20px 8px;
+  gap: 2px;
+  border: 0;
+  background: none;
+  color: var(--or-text-3);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bottom-bar__item.is-active {
+  color: var(--or-accent);
+}
+
+.more-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 8px 24px;
 }
 
 .logo {
-  width: 32px;
-  height: 32px;
   flex-shrink: 0;
-}
-
-.brand-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  height: 56px;
-}
-
-.header-left {
-  flex: 1;
-  min-width: 0;
-}
-
-.header-back {
-  flex-shrink: 0;
-}
-
-.header-breadcrumb {
-  min-width: 0;
-}
-
-.header-link {
-  color: var(--n-text-color-2);
-  text-decoration: none;
-  font-size: 0.875rem;
-}
-
-.header-link:hover {
-  color: var(--n-primary-color);
 }
 </style>

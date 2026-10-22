@@ -21,12 +21,12 @@ class McpResourceMeta(TypedDict):
 MCP_TOOLS: list[McpToolMeta] = [
     {
         "name": "get_health",
-        "description": "Server version, model pack, loaded models, and maintenance flag.",
+        "description": "Server version, hardware, loaded models, and maintenance flag.",
         "scope": "read",
     },
     {
         "name": "get_capabilities",
-        "description": "Modalities, recognition types, and enabled endpoints for this pack.",
+        "description": "Modalities, recognition types, and enabled endpoints.",
         "scope": "read",
     },
     {

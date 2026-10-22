@@ -58,12 +58,14 @@ class RecognitionLogService:
         actor_type: str | None = None,
         actor_name: str | None = None,
         details: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         from_auth_type, from_auth_id, from_auth_name = _actor_from_auth(auth)
         actor_type = actor_type or from_auth_type
         actor_id = from_auth_id
         actor_name = actor_name or from_auth_name
         details_json = json.dumps(details) if details else None
+        log_id = str(uuid.uuid4())
+        created_at = _now()
         self.db.execute(
             """INSERT INTO recognition_logs (
                 id, event, modality, label, entity_id, confidence,
@@ -71,7 +73,7 @@ class RecognitionLogService:
                 actor_type, actor_id, actor_name, latency_ms, dry_run, details, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                str(uuid.uuid4()),
+                log_id,
                 event,
                 modality,
                 label,
@@ -89,10 +91,38 @@ class RecognitionLogService:
                 latency_ms,
                 1 if dry_run else 0,
                 details_json,
-                _now(),
+                created_at,
             ),
         )
         self.prune_old()
+        payload = {
+            "id": log_id,
+            "event": event,
+            "modality": modality,
+            "label": label,
+            "entity_id": entity_id,
+            "confidence": confidence,
+            "camera_id": camera_id,
+            "zone": zone,
+            "request_id": request_id,
+            "gate": gate,
+            "reason": reason,
+            "summary": summary,
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "latency_ms": latency_ms,
+            "dry_run": dry_run,
+            "details": details,
+            "created_at": created_at,
+        }
+        try:
+            from openrecognition.api.routes.events import publish_event
+
+            publish_event({"type": "recognition.log", "log": payload})
+        except Exception:
+            pass
+        return payload
 
     def append(
         self,
@@ -122,6 +152,13 @@ class RecognitionLogService:
             dry_run=dry_run,
             auth=auth,
         )
+
+    def has_recognition(self) -> bool:
+        row = self.db.fetchone(
+            "SELECT 1 AS ok FROM recognition_logs "
+            "WHERE event LIKE 'recognition.%' OR dry_run = 1 LIMIT 1"
+        )
+        return row is not None
 
     def list_logs(
         self,

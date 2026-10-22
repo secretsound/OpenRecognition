@@ -39,6 +39,8 @@ class WyomingBridge:
         require_speaker_match: bool,
         block_on_gate_reject: bool,
         tag_speaker: bool,
+        include_confidence: bool = True,
+        include_candidates: bool = False,
         zeroconf_enabled: bool = True,
         zeroconf_name: str = "openrecognition",
         advertise_host: str = "",
@@ -50,6 +52,8 @@ class WyomingBridge:
         self.require_speaker_match = require_speaker_match
         self.block_on_gate_reject = block_on_gate_reject
         self.tag_speaker = tag_speaker
+        self.include_confidence = include_confidence
+        self.include_candidates = include_candidates
         self.zeroconf_enabled = zeroconf_enabled
         self.zeroconf_name = zeroconf_name
         self.advertise_host = advertise_host
@@ -78,6 +82,8 @@ class WyomingBridge:
         require_speaker_match: bool | None = None,
         block_on_gate_reject: bool | None = None,
         tag_speaker: bool | None = None,
+        include_confidence: bool | None = None,
+        include_candidates: bool | None = None,
         zeroconf_enabled: bool | None = None,
         zeroconf_name: str | None = None,
         advertise_host: str | None = None,
@@ -96,6 +102,10 @@ class WyomingBridge:
             self.block_on_gate_reject = block_on_gate_reject
         if tag_speaker is not None:
             self.tag_speaker = tag_speaker
+        if include_confidence is not None:
+            self.include_confidence = include_confidence
+        if include_candidates is not None:
+            self.include_candidates = include_candidates
         if zeroconf_enabled is not None:
             self.zeroconf_enabled = zeroconf_enabled
         if zeroconf_name is not None:
@@ -109,13 +119,14 @@ class WyomingBridge:
         await self.restart(state)
 
     async def stop(self) -> None:
-        if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        task = self._task
         self._task = None
+        if task and not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=2.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
         self.upstream_ready = False
         self._upstream_languages = ["en"]
         self._supports_transcript_streaming = False
@@ -231,6 +242,8 @@ class WyomingBridge:
                     require_speaker_match=self.require_speaker_match,
                     block_on_gate_reject=self.block_on_gate_reject,
                     tag_speaker=self.tag_speaker,
+                    include_confidence=self.include_confidence,
+                    include_candidates=self.include_candidates,
                 )
 
             await server.run(handler_factory)

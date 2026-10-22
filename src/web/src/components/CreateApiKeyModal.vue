@@ -315,7 +315,7 @@ watch(show, (open) => {
       >
         <span class="purpose-card__title">AI assistant</span>
         <span class="purpose-card__desc">
-          Let Claude or Cursor look up the library and try a match.
+          Let Claude or Cursor look up the library and recognize a clip.
         </span>
       </button>
       <button

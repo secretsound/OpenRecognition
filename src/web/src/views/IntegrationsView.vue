@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import SegmentedControl from "@/components/kit/SegmentedControl.vue";
 import WebhooksPanel from "@/components/integrations/WebhooksPanel.vue";
 import MqttPanel from "@/components/integrations/MqttPanel.vue";
 import WyomingPanel from "@/components/integrations/WyomingPanel.vue";
@@ -19,17 +20,17 @@ const cards = [
   {
     id: "mqtt",
     title: "MQTT",
-    sentence: "Publish matches to a message broker so other devices can react.",
+    sentence: "Connect to a broker — including username and password — and publish each match.",
   },
   {
     id: "wyoming",
     title: "Wyoming",
-    sentence: "Home Assistant Assist uses this to hear who is speaking.",
+    sentence: "Home Assistant Assist connects here to hear who is speaking, then sends the audio to speech-to-text.",
   },
   {
     id: "mcp",
     title: "MCP",
-    sentence: "Let an AI assistant call OpenRecognition with an API key. MCP is a tool protocol for those assistants.",
+    sentence: "Give Cursor, Claude, or another assistant a key so it can look up people and run a match.",
   },
 ] as const;
 
@@ -58,25 +59,18 @@ watch(
 </script>
 
 <template>
-  <div class="integrations-page">
-    <AppPageHeader
+  <div class="or-page">
+    <PageHeader
       title="Connections"
       description="Tell other apps when someone or something is recognized."
     />
 
-    <div class="or-card-grid">
-      <button
-        v-for="card in cards"
-        :key="card.id"
-        type="button"
-        class="or-choice-card"
-        :class="{ 'is-selected': activeTab === card.id }"
-        @click="activeTab = card.id"
-      >
-        <span class="or-choice-card__title">{{ card.title }}</span>
-        <span class="or-choice-card__desc">{{ card.sentence }}</span>
-      </button>
-    </div>
+    <p class="or-muted">{{ cards.find((c) => c.id === activeTab)?.sentence }}</p>
+    <SegmentedControl
+      v-model="activeTab"
+      aria-label="Connections"
+      :options="cards.map((c) => ({ value: c.id, label: c.title }))"
+    />
 
     <section class="connection-panel">
       <WebhooksPanel v-if="activeTab === 'webhooks'" />
@@ -88,16 +82,6 @@ watch(
 </template>
 
 <style scoped>
-.integrations-page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--or-section-gap);
-}
-
-.integrations-page :deep(.app-page-header) {
-  margin-bottom: 0;
-}
-
 .connection-panel {
   display: flex;
   flex-direction: column;

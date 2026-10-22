@@ -79,25 +79,21 @@ def cmd_enroll(args):
 
 
 def cmd_models_list(args):
-    from openrecognition.config import settings
-    from openrecognition.models_download import list_catalog
+    from openrecognition.models_download import list_catalog, list_categories, list_presets
 
-    pack = args.pack or settings.pack
-    rows = list_catalog(pack=pack)
+    rows = list_catalog()
     if args.json:
         print(json.dumps(rows, indent=2))
         return
-    print(f"ONNX catalog for pack '{pack}' (weights are downloaded, not in git):\n")
-    from openrecognition.models_download import list_categories, list_presets
-
-    for preset in list_presets(pack=pack):
+    print("ONNX catalog (weights are downloaded, not stored in git):\n")
+    for preset in list_presets():
         print(f"  [{preset['tier']}] {preset['label']}: {', '.join(preset['keys'])}")
         print(f"    {preset['description']}\n")
     print("Models by category:\n")
     cat_labels = {c["id"]: c["label"] for c in list_categories()}
     for row in rows:
         label = cat_labels.get(row["category"], row["category"])
-        print(f"  {row['key']}  ({label}, {row['tier']})  [{row['source']}]")
+        print(f"  {row['key']}  ({label}, {row['hardware']})  [{row['source']}]")
         print(f"    {row['use_for']}")
         print(f"    {row['description']}")
         print(f"    {row['url']}\n")
@@ -107,14 +103,11 @@ def cmd_models_download(args):
     from openrecognition.config import settings
     from openrecognition.models_download import download_models
 
-    pack = args.pack or settings.pack
-    pack_dir = settings.model_packs_dir / pack
-    if not pack_dir.is_dir():
-        print(f"Pack directory not found: {pack_dir}", file=sys.stderr)
-        sys.exit(1)
+    model_dir = settings.models_dir
+    model_dir.mkdir(parents=True, exist_ok=True)
     keys = args.only if args.only else None
     try:
-        results = download_models(pack_dir, keys=keys, force=args.force)
+        results = download_models(model_dir, keys=keys, force=args.force)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         sys.exit(1)
@@ -129,28 +122,25 @@ def cmd_models_download(args):
 def cmd_models_status(args):
     from openrecognition.config import settings
     from openrecognition.inference.session_pool import ModelSessionPool
-    from openrecognition.models_download import list_catalog
+    from openrecognition.models_download import list_catalog, resolve_weight
 
-    pack = args.pack or settings.pack
-    pack_dir = settings.model_packs_dir / pack
-    pool = ModelSessionPool(pack_dir)
-    catalog = {r["key"]: r for r in list_catalog(pack=pack)}
+    model_dir = settings.models_dir
+    pool = ModelSessionPool(model_dir, search_dirs=settings.model_search_dirs)
+    catalog = {r["key"]: r for r in list_catalog()}
     if args.json:
         out = {
-            "pack": pack,
-            "pack_dir": str(pack_dir),
+            "models_dir": str(model_dir),
             "on_disk": pool.list_models(),
             "catalog": catalog,
         }
         print(json.dumps(out, indent=2))
         return
-    print(f"Pack: {pack} ({pack_dir})\n")
+    print(f"Models: {model_dir}\n")
     for key, row in catalog.items():
-        path = pack_dir / row["filename"]
-        on_disk = path.exists()
-        mark = "yes" if on_disk else "no"
+        path = resolve_weight(row["filename"], settings.model_search_dirs)
+        mark = "yes" if path else "no"
         print(f"  {key}: on disk={mark}  source={row['source']}")
-        if not on_disk:
+        if path is None:
             print(f"    download: openrecognition models download --only {key}")
 
 
@@ -225,12 +215,10 @@ def main():
     models_sub = p_models.add_subparsers(dest="models_cmd", required=True)
 
     p_ml = models_sub.add_parser("list", help="Show download URLs and sources")
-    p_ml.add_argument("--pack", default=None, choices=["edge", "standard", "home"])
     p_ml.add_argument("--json", action="store_true")
     p_ml.set_defaults(func=cmd_models_list)
 
-    p_md = models_sub.add_parser("download", help="Download ONNX files into model-packs/")
-    p_md.add_argument("--pack", default=None, choices=["edge", "standard", "home"])
+    p_md = models_sub.add_parser("download", help="Download ONNX files into the models directory")
     p_md.add_argument(
         "--only",
         action="append",
@@ -242,7 +230,6 @@ def main():
     p_md.set_defaults(func=cmd_models_download)
 
     p_ms = models_sub.add_parser("status", help="Which catalog models exist on disk")
-    p_ms.add_argument("--pack", default=None, choices=["edge", "standard", "home"])
     p_ms.add_argument("--json", action="store_true")
     p_ms.set_defaults(func=cmd_models_status)
 

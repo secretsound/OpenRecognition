@@ -22,7 +22,7 @@ def health(state: AppState = Depends(get_state)):
     return {
         "status": "ok",
         "version": __version__,
-        "pack": state.settings.pack,
+        "hardware": state.hardware_info(),
         "models": state.pool.list_models(),
         "inference": state.inference_policy.status(),
         "maintenance": state.maintenance_mode,

@@ -1,0 +1,16 @@
+{
+  "name": "OpenRecognition",
+  "short_name": "OpenRecognition",
+  "description": "Enroll people, pets, objects, and sounds, then recognize them on your own hardware.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f4f1",
+  "theme_color": "#1f9d55",
+  "icons": [
+    {
+      "src": "/src/assets/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

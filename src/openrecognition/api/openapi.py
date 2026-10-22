@@ -16,7 +16,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": "capabilities",
-        "description": "Discover packs, models, and supported recognition types.",
+        "description": "Discover models and supported recognition types.",
     },
     {
         "name": "enrollments",
@@ -73,6 +73,10 @@ PUBLIC_PATHS = {
 API_DESCRIPTION = """
 OpenRecognition is an API-first service for **speaker identification**, **audio gating**,
 **face and pet recognition**, and **video timelines** — designed for homelab and Home Assistant.
+
+The web console at `/` is the day-to-day UI: **Library** for enrollments, **Recognize**
+for a clip or photo, **Activity** for the audit log, and **Connections** for webhooks,
+MQTT, Wyoming, and MCP.
 
 ## Interactive documentation
 

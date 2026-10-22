@@ -18,7 +18,6 @@ services:
     environment:
       OPENRECOGNITION_HOST: "0.0.0.0"
       OPENRECOGNITION_AUTH_REQUIRED: "true"
-      OPENRECOGNITION_PACK: edge
       OPENRECOGNITION_WEB_ENABLED: "true"
     restart: unless-stopped
 

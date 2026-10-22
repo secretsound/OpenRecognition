@@ -59,7 +59,7 @@ const router = createRouter({
           path: "test",
           name: "test",
           component: () => import("@/views/TestView.vue"),
-          meta: { breadcrumbs: [{ label: "Try a match" }] },
+          meta: { breadcrumbs: [{ label: "Recognize" }] },
         },
         {
           path: "enrollments/:id",
@@ -75,26 +75,20 @@ const router = createRouter({
         {
           path: "enrollments/:id/settings",
           name: "enrollment-settings",
-          component: () => import("@/views/EnrollmentSettingsView.vue"),
-          meta: {
-            breadcrumbs: [
-              { label: "Library", to: "/enrollments" },
-              { label: "Detail" },
-              { label: "Settings" },
-            ],
-          },
+          redirect: (to) => ({
+            name: "enrollment-detail",
+            params: { id: to.params.id },
+            query: { tab: "settings" },
+          }),
         },
         {
           path: "enrollments/:id/training",
           name: "enrollment-training",
-          component: () => import("@/views/EnrollmentTrainingView.vue"),
-          meta: {
-            breadcrumbs: [
-              { label: "Library", to: "/enrollments" },
-              { label: "Detail" },
-              { label: "Add samples" },
-            ],
-          },
+          redirect: (to) => ({
+            name: "enrollment-detail",
+            params: { id: to.params.id },
+            query: { tab: "samples", teach: "1" },
+          }),
         },
         {
           path: "users",

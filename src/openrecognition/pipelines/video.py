@@ -122,14 +122,14 @@ def recognize_video_bytes(
     gate_value: str | None = None
     reason: str | None = None
     scores: dict[str, float] | None = None
-    audio_gallery = state.gallery.get_embeddings_for_match(
-        modality="audio",
-        model_version=state.speaker.current_model_version(),
+    from openrecognition.inference.alternates import (
+        face_alternates,
+        speaker_alternates,
+        visual_alternates,
     )
-    image_gallery = state.gallery.image_embeddings_for_match(
-        state.vision.current_face_model_version(),
-        state.vision.current_visual_model_version(),
-    )
+
+    audio_gallery = state.gallery.get_embeddings_for_match(modality="audio")
+    image_gallery = state.gallery.get_embeddings_for_match(modality="image")
 
     if "audio" in mods or "voice" in mods:
         try:
@@ -144,10 +144,14 @@ def recognize_video_bytes(
                 from openrecognition.inference.audio_gate import load_wav_pcm
 
                 audio, sr = load_wav_pcm(wav)
-                vec = state.speaker.embed(wav)
-                for m in state.speaker.match_gallery(
-                    vec, audio_gallery, min_confidence, return_unknown
-                ):
+                outcome = state.speaker.match_retained(
+                    wav,
+                    audio_gallery,
+                    min_confidence,
+                    return_unknown,
+                    alternates=speaker_alternates(state, audio_gallery),
+                )
+                for m in outcome["matches"]:
                     e = EntityResult(**m)
                     e.time_range = [0.0, len(audio) / sr]
                     e.modality = "audio"
@@ -173,6 +177,8 @@ def recognize_video_bytes(
                     min_confidence=min_confidence,
                     return_unknown=return_unknown,
                     include_candidates=False,
+                    face_alternates=face_alternates(state, image_gallery),
+                    visual_alternates=visual_alternates(state, image_gallery),
                 )
                 for ent in raw:
                     label = ent["label"]

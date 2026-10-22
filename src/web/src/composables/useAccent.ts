@@ -10,12 +10,24 @@ import {
 const STORAGE_KEY = "or-accent";
 
 function loadAccent(): AccentPresetId {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (isAccentPresetId(stored)) return stored;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (isAccentPresetId(stored)) return stored;
+  } catch {
+    /* private mode */
+  }
   return defaultAccentId;
 }
 
 const accentId = ref<AccentPresetId>(loadAccent());
+
+watch(accentId, (v) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, v);
+  } catch {
+    /* ignore */
+  }
+});
 
 export function useAccent() {
   const preset = computed(() => accentPresets[accentId.value]);
@@ -23,7 +35,8 @@ export function useAccent() {
   const accentOptions = computed(() =>
     Object.values(accentPresets).map((p) => ({
       label: p.label,
-      value: p.id,
+      value: p.id as AccentPresetId,
+      color: p.primary,
     })),
   );
 
@@ -35,14 +48,11 @@ export function useAccent() {
     return buildThemeOverrides(accentId.value, isDark);
   }
 
-  watch(accentId, (v) => localStorage.setItem(STORAGE_KEY, v), { immediate: true });
-
   return {
     accentId,
     preset,
     accentOptions,
     setAccent,
     overridesFor,
-    gradientEnd: computed(() => preset.value.gradientEnd),
   };
 }

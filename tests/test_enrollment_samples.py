@@ -84,3 +84,55 @@ def test_voice_wizard_meta_via_form(client, auth_headers):
     assert samples[0]["source"] == "voice_wizard"
     assert samples[0]["phrase_index"] == 0
     assert "quick brown fox" in samples[0]["source_label"]
+
+
+def test_sample_preview_does_not_persist(client, auth_headers):
+    created = client.post(
+        "/v1/enrollments",
+        headers=auth_headers,
+        data={"type": "person", "label": "previewuser"},
+        files=[],
+    )
+    assert created.status_code == 200
+    eid = created.json()["id"]
+
+    preview = client.post(
+        f"/v1/enrollments/{eid}/samples/preview",
+        headers=auth_headers,
+        files={"file": ("take.wav", wav_bytes(duration=4.0), "audio/wav")},
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert 0 <= body["score"] <= 1
+    assert body["verdict"] in {"keep", "retry"}
+    assert "advice" in body
+    assert body["duration_ms"] is None or body["duration_ms"] > 0
+
+    samples = client.get(f"/v1/enrollments/{eid}/samples", headers=auth_headers).json()
+    assert samples == []
+
+
+def test_sample_preview_accepts_image(client, auth_headers):
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (96, 96), color=(90, 130, 180)).save(buf, format="PNG")
+    created = client.post(
+        "/v1/enrollments",
+        headers=auth_headers,
+        data={"type": "person", "label": "facepreview"},
+        files=[],
+    )
+    eid = created.json()["id"]
+    preview = client.post(
+        f"/v1/enrollments/{eid}/samples/preview",
+        headers=auth_headers,
+        files={"file": ("face.png", buf.getvalue(), "image/png")},
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert 0 <= body["score"] <= 1
+    assert body["verdict"] in {"keep", "retry"}
+    assert client.get(f"/v1/enrollments/{eid}/samples", headers=auth_headers).json() == []

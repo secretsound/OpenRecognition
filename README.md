@@ -9,7 +9,7 @@ Enroll the people, pets, and things that live with you. Hand it a voice clip, a 
 - **Voices and faces.** One person, two ways to say hello: a clip of them speaking, or their face in a photo or video.
 - **Pets and objects.** The dog gets a name. So can the backpack.
 - **Audio gate.** Hear the difference between someone talking and the TV in the background, before speech-to-text ever starts.
-- **Web console.** Enroll, try a match, manage keys, and peek at activity from the browser.
+- **Web console.** Enroll, recognize a clip or photo, manage keys, and peek at activity from the browser.
 - **Webhooks and MQTT.** Matches land where your automations already live. It can also act as a **Wyoming endpoint**, so a voice pipeline learns who is talking before speech-to-text runs.
 
 Samples turn into embeddings and get compared locally. Install the ONNX weights when you want the real speaker, face, and vision models. The API is happy to run on built-in heuristics until you do.
@@ -33,7 +33,7 @@ docker run -d --name openrecognition \
   ghcr.io/secretsound/openrecognition:dev
 ```
 
-Variables use the `OPENRECOGNITION_` prefix. The image already sets `HOST=0.0.0.0`, `PORT=8080`, `DATA_DIR=/data`, `MODEL_PACKS_DIR=/models`, and `PACK=edge`. `AUTH_REQUIRED` and `WEB_ENABLED` default to `true`. Set `WYOMING_ENABLED=true` and publish `10301` when Home Assistant should use the Wyoming proxy. MQTT stays off until `MQTT_ENABLED=true`. The [container guide](docker/README.md) lists every variable, the volume layout, and the release tags.
+Variables use the `OPENRECOGNITION_` prefix. The image already sets `HOST=0.0.0.0`, `PORT=8080`, `DATA_DIR=/data`, and `MODELS_DIR=/models`. `AUTH_REQUIRED` and `WEB_ENABLED` default to `true`. Set `WYOMING_ENABLED=true` and publish `10301` when Home Assistant should use the Wyoming proxy. MQTT stays off until `MQTT_ENABLED=true`. The [container guide](docker/README.md) lists every variable, the volume layout, and the release tags.
 
 Open [http://127.0.0.1:8080/](http://127.0.0.1:8080/) and sign in as `admin`. The API explorer is at [/docs](http://127.0.0.1:8080/docs).
 

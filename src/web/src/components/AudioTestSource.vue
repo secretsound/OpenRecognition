@@ -20,8 +20,13 @@ import {
 import { useVoiceRecorder } from "@/composables/useVoiceRecorder";
 import VoiceWaveform from "@/components/VoiceWaveform.vue";
 import { isSecureEnoughForMic } from "@/utils/secureContext";
+import { useLiveListen } from "@/composables/useLiveListen";
 
 const file = defineModel<File | null>({ required: true });
+const emit = defineEmits<{
+  window: [file: File];
+  listening: [active: boolean];
+}>();
 
 const message = useMessage();
 const recorder = useVoiceRecorder();
@@ -31,7 +36,8 @@ const waveformSource = {
   level: recorder.audioLevel,
 };
 
-const source = ref<"upload" | "record" | null>(null);
+const source = ref<"upload" | "record" | "listen" | null>(null);
+const live = useLiveListen();
 const fileList = ref<UploadFileInfo[]>([]);
 const micReady = ref(false);
 const micDevices = ref<MediaDeviceInfo[]>([]);
@@ -75,11 +81,18 @@ watch(source, (mode) => {
   fileList.value = [];
   file.value = null;
   recorder.reset();
+  live.stop();
+  emit("listening", false);
   micReady.value = false;
-  if (mode === "record" && isSecureEnoughForMic()) {
+  if ((mode === "record" || mode === "listen") && isSecureEnoughForMic()) {
     void prepareMic();
   }
 });
+
+watch(
+  () => live.listening.value,
+  (active) => emit("listening", active),
+);
 
 watch(fileList, syncFileFromUpload, { deep: true });
 
@@ -140,6 +153,29 @@ function playPreview() {
   const audio = new Audio(url);
   void audio.play();
 }
+
+const isListening = computed(() => live.listening.value);
+const listenWaveform = {
+  levels: live.levels,
+  level: live.audioLevel,
+};
+
+async function toggleListen() {
+  if (isListening.value) {
+    live.stop();
+    return;
+  }
+  try {
+    if (!micReady.value) await prepareMic();
+    await live.start((blob) => {
+      const next = new File([blob], "live-listen.wav", { type: "audio/wav" });
+      file.value = next;
+      emit("window", next);
+    }, selectedMicId.value ?? undefined);
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : "Could not start live listen");
+  }
+}
 </script>
 
 <template>
@@ -153,11 +189,41 @@ function playPreview() {
         <span class="or-choice-card__title">Record with the microphone</span>
         <span class="or-choice-card__desc">Speak a short phrase and check it now.</span>
       </button>
+      <button type="button" class="or-choice-card" @click="source = 'listen'">
+        <span class="or-choice-card__title">Listen live</span>
+        <span class="or-choice-card__desc">Keep the mic open. We’ll check every couple of seconds.</span>
+      </button>
     </div>
 
-    <NButton v-else text type="primary" class="source-switch" @click="source = source === 'upload' ? 'record' : 'upload'">
-      {{ source === "upload" ? "Record with the microphone instead" : "Upload a clip instead" }}
-    </NButton>
+    <div v-else class="source-switch-row">
+      <NButton
+        v-if="source !== 'upload'"
+        text
+        type="primary"
+        class="source-switch"
+        @click="source = 'upload'"
+      >
+        Upload a clip instead
+      </NButton>
+      <NButton
+        v-if="source !== 'record'"
+        text
+        type="primary"
+        class="source-switch"
+        @click="source = 'record'"
+      >
+        Record a clip instead
+      </NButton>
+      <NButton
+        v-if="source !== 'listen'"
+        text
+        type="primary"
+        class="source-switch"
+        @click="source = 'listen'"
+      >
+        Listen live instead
+      </NButton>
+    </div>
 
     <div v-if="source === 'upload'" class="source-panel">
       <NUpload
@@ -267,6 +333,76 @@ function playPreview() {
         </p>
       </template>
     </div>
+
+    <div v-else-if="source === 'listen'" class="source-panel source-panel--record">
+      <NAlert
+        v-if="!isSecureEnoughForMic()"
+        type="warning"
+        :bordered="false"
+        title="HTTPS required for microphone"
+        style="margin-bottom: 12px"
+      >
+        Use <strong>https://localhost:5173</strong> in dev, or serve the UI over HTTPS.
+      </NAlert>
+
+      <template v-else>
+        <div class="record-toolbar">
+          <NButton
+            v-if="!micReady"
+            type="primary"
+            size="small"
+            @click="prepareMic"
+          >
+            <template #icon>
+              <NIcon><MicOutline /></NIcon>
+            </template>
+            Allow microphone
+          </NButton>
+          <NTag v-else size="small" :type="isListening ? 'warning' : 'success'" :bordered="false">
+            {{ isListening ? "Listening" : "Microphone ready" }}
+          </NTag>
+        </div>
+
+        <div v-if="micReady && micOptions.length > 0" class="mic-picker">
+          <label class="picker-label">Input device</label>
+          <NSelect
+            :value="selectedMicId"
+            :options="micOptions"
+            size="small"
+            placeholder="Select microphone"
+            :disabled="isListening"
+            @update:value="changeMicDevice"
+          />
+        </div>
+
+        <VoiceWaveform v-if="isListening" :source="listenWaveform" />
+
+        <div class="record-actions">
+          <NButton
+            :type="isListening ? 'warning' : 'primary'"
+            size="large"
+            :disabled="!micReady && !isListening"
+            @click="toggleListen"
+          >
+            <template #icon>
+              <NIcon>
+                <StopOutline v-if="isListening" />
+                <MicOutline v-else />
+              </NIcon>
+            </template>
+            {{ isListening ? "Stop listening" : "Start listening" }}
+          </NButton>
+        </div>
+
+        <p class="record-hint" :class="{ 'record-hint--ok': isListening }">
+          {{
+            isListening
+              ? "Speak naturally. Results update as we hear you."
+              : "We’ll send a short rolling window every couple of seconds."
+          }}
+        </p>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -281,6 +417,12 @@ function playPreview() {
   display: flex;
   flex-direction: column;
   gap: var(--or-inline-gap);
+}
+
+.source-switch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .source-switch {

@@ -1,137 +1,243 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { NButton, NIcon, NSkeleton, NTag } from "naive-ui";
-import { AddOutline, CameraOutline, LinkOutline } from "@vicons/ionicons5";
+import { NButton, NIcon } from "naive-ui";
+import { AddOutline, CheckmarkCircleOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import type { ConsoleOverviewOut, EnrollmentOut, PresenceEntry, RecognitionLogOut } from "@/types/api";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import ProfileMark from "@/components/kit/ProfileMark.vue";
+import TimeAgo from "@/components/kit/TimeAgo.vue";
+import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
+import Chip from "@/components/kit/Chip.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import StatusPill from "@/components/StatusPill.vue";
 import TypeTag from "@/components/TypeTag.vue";
-import type { EnrollmentOut, RecognitionLogListOut, RecognitionLogOut } from "@/types/api";
-import { needsAttention } from "@/utils/enrollmentStatus";
-import { formatLogEvent } from "@/utils/logEvent";
+import { verdictFromLog } from "@/utils/verdict";
+import { canWrite } from "@/utils/roles";
+import { useAuth } from "@/composables/useAuth";
+import { useEventStream } from "@/composables/useEventStream";
 
 const router = useRouter();
+const { role } = useAuth();
 const loading = ref(true);
 const loadError = ref<string | null>(null);
 const enrollments = ref<EnrollmentOut[]>([]);
 const activity = ref<RecognitionLogOut[]>([]);
+const attention = ref<EnrollmentOut[]>([]);
+const readyCount = ref(0);
+const modelsReady = ref(false);
+const models = ref<Record<string, string>>({});
+const wyomingOn = ref(false);
+const webhookCount = ref(0);
+const hasRecognition = ref(false);
+const lastSeen = ref<PresenceEntry | null>(null);
 
-const attention = computed(() => enrollments.value.filter(needsAttention).slice(0, 5));
+const setup = computed(() => {
+  const hasModels = modelsReady.value || Object.keys(models.value).length > 0;
+  const hasProfile = enrollments.value.length > 0;
+  const hasTest = hasRecognition.value;
+  const hasConnection = wyomingOn.value || webhookCount.value > 0;
+  return [
+    {
+      id: "models",
+      title: "Download models for this machine",
+      done: hasModels,
+      to: "/models",
+    },
+    {
+      id: "profile",
+      title: "Add your first profile",
+      done: hasProfile,
+      to: "/enrollments/new",
+    },
+    {
+      id: "recognize",
+      title: "Recognize something",
+      done: hasTest,
+      to: "/test",
+    },
+    {
+      id: "connect",
+      title: "Connect Home Assistant or a webhook",
+      done: hasConnection,
+      to: "/integrations/wyoming",
+    },
+  ];
+});
 
-onMounted(async () => {
+const setupOpen = computed(() => setup.value.some((s) => !s.done));
+
+function applyOverview(data: ConsoleOverviewOut) {
+  enrollments.value = data.enrollments;
+  attention.value = data.attention;
+  readyCount.value = data.ready_count;
+  activity.value = data.recent_activity;
+  lastSeen.value = data.last_seen;
+  modelsReady.value = data.models_ready;
+  models.value = data.models;
+  wyomingOn.value = data.wyoming_enabled;
+  webhookCount.value = data.webhook_count;
+  hasRecognition.value = data.has_recognition;
+}
+
+async function load() {
   loading.value = true;
   loadError.value = null;
   try {
-    const [people, logs] = await Promise.all([
-      api<EnrollmentOut[]>("/v1/enrollments"),
-      api<RecognitionLogListOut>("/v1/admin/logs?limit=5&offset=0").catch(() => null),
-    ]);
-    enrollments.value = people;
-    activity.value = logs?.items ?? [];
+    applyOverview(await api<ConsoleOverviewOut>("/v1/console/overview"));
   } catch (e) {
     loadError.value = loadFailureMessage(e, "Couldn't load the home page");
   } finally {
     loading.value = false;
   }
+}
+
+useEventStream((event) => {
+  const log = event.log;
+  if (!log || event.type !== "recognition.log") return;
+  activity.value = [log, ...activity.value.filter((row) => row.id !== log.id)].slice(0, 8);
+  if (log.event.startsWith("recognition.") || log.dry_run) {
+    hasRecognition.value = true;
+  }
+  if (log.event === "recognition.match" && !log.dry_run && log.entity_id && log.label) {
+    lastSeen.value = {
+      enrollment_id: log.entity_id,
+      label: log.label,
+      type: lastSeen.value?.enrollment_id === log.entity_id ? lastSeen.value.type : "person",
+      last_seen_at: log.created_at,
+      last_modality: log.modality ?? lastSeen.value?.last_modality ?? "audio",
+      last_camera_id: log.camera_id,
+      confidence: log.confidence,
+    };
+    const idx = enrollments.value.findIndex((row) => row.id === log.entity_id);
+    if (idx >= 0) {
+      const next = { ...enrollments.value[idx], last_seen_at: log.created_at };
+      enrollments.value.splice(idx, 1, next);
+    }
+  }
 });
+
+onMounted(load);
 </script>
 
 <template>
-  <div class="home">
-    <AppPageHeader
-      title="Home"
-      description="Enroll people, pets, objects, and sounds, then try a match to see who or what was recognized."
+  <div class="or-page">
+    <PageHeader
+      title="Overview"
+      description="How this server is doing, and what needs a look."
     >
-      <template #action>
+      <template v-if="canWrite(role)" #action>
         <NButton type="primary" @click="router.push('/enrollments/new')">
           <template #icon>
             <NIcon><AddOutline /></NIcon>
           </template>
-          Add someone or something
+          Add
         </NButton>
       </template>
-    </AppPageHeader>
+    </PageHeader>
 
-    <NSkeleton v-if="loading" text :repeat="6" />
+    <ContentSkeleton v-if="loading" variant="detail" />
     <EmptyState
       v-else-if="loadError"
-      title="Couldn't load home"
+      title="Couldn't load overview"
       :description="loadError"
       action-label="Retry"
-      @action="router.go(0)"
+      @action="load"
     />
     <template v-else>
-      <div class="or-card-grid">
-        <button type="button" class="or-choice-card" @click="router.push('/enrollments/new')">
-          <span class="or-choice-card__title">Add someone or something</span>
-          <span class="or-choice-card__desc">
-            Start with a person, pet, object, or sound. Guided capture walks you through samples.
-          </span>
+      <section v-if="setupOpen" class="or-surface or-surface--md">
+        <h2 class="or-heading">Get started</h2>
+        <p class="or-muted or-small" style="margin-top: 6px">
+          Four steps. Each one unlocks the next thing this server is good at.
+        </p>
+        <ol class="setup-list">
+          <li v-for="step in setup" :key="step.id">
+            <button type="button" class="setup-row" @click="router.push(step.to)">
+              <NIcon
+                :size="20"
+                :class="step.done ? 'is-done' : 'is-todo'"
+                :component="CheckmarkCircleOutline"
+              />
+              <span :class="{ 'is-done-label': step.done }">{{ step.title }}</span>
+            </button>
+          </li>
+        </ol>
+      </section>
+
+      <div class="status-strip">
+        <button type="button" class="status-tile" @click="router.push('/models')">
+          <span class="or-caps">Models</span>
+          <strong>{{ modelsReady || Object.keys(models).length ? "Ready" : "Not downloaded" }}</strong>
         </button>
-        <button type="button" class="or-choice-card" @click="router.push('/test')">
-          <NIcon :size="18"><CameraOutline /></NIcon>
-          <span class="or-choice-card__title">Try a photo or clip</span>
-          <span class="or-choice-card__desc">
-            Upload or record media and see the closest match. Practice runs do not notify Connections.
-          </span>
+        <button type="button" class="status-tile" @click="router.push('/integrations/wyoming')">
+          <span class="or-caps">Home Assistant</span>
+          <strong>{{ wyomingOn ? "Connected" : "Off" }}</strong>
+        </button>
+        <button type="button" class="status-tile" @click="router.push('/enrollments')">
+          <span class="or-caps">Library</span>
+          <strong>{{ readyCount }} ready</strong>
+          <span v-if="attention.length" class="or-muted or-small">{{ attention.length }} need a look</span>
         </button>
         <button
           type="button"
-          class="or-choice-card"
-          @click="router.push({ name: 'integrations', params: { tab: 'wyoming' } })"
+          class="status-tile"
+          @click="router.push(lastSeen ? `/enrollments/${lastSeen.enrollment_id}` : '/logs')"
         >
-          <NIcon :size="18"><LinkOutline /></NIcon>
-          <span class="or-choice-card__title">Connect Home Assistant</span>
-          <span class="or-choice-card__desc">
-            Wyoming lets Assist hear who is speaking. Webhooks and MQTT are on the same page.
-          </span>
+          <span class="or-caps">Last seen</span>
+          <strong v-if="lastSeen">{{ lastSeen.label }}</strong>
+          <strong v-else>Nobody yet</strong>
+          <TimeAgo v-if="lastSeen" :value="lastSeen.last_seen_at" />
         </button>
       </div>
 
-      <EmptyState
-        v-if="enrollments.length === 0"
-        title="Nothing enrolled yet"
-        description="Add a person, pet, object, or sound. You can try a match after the first samples are in."
-        action-label="Add someone or something"
-        @action="router.push('/enrollments/new')"
-      />
-
-      <section v-else class="home-section">
-        <h2 class="home-section__title">Needs attention</h2>
-        <p v-if="attention.length === 0" class="home-empty">
-          Everything enrolled is ready to match.
-        </p>
-        <div v-else class="or-list-cards home-list">
-          <button
-            v-for="row in attention"
-            :key="row.id"
-            type="button"
-            class="or-list-card"
-            @click="router.push(`/enrollments/${row.id}`)"
-          >
-            <span class="or-list-card__title">{{ row.label }}</span>
-            <span class="or-list-card__meta">
-              <TypeTag :type="row.type" />
-              <StatusPill :enrollment="row" />
-              <span>{{ row.sample_count }} samples</span>
-            </span>
-          </button>
-        </div>
+      <section v-if="enrollments.length === 0">
+        <EmptyState
+          title="Nothing enrolled yet"
+          description="Add a person, pet, object, or sound. You can recognize them after the first samples are in."
+          action-label="Add"
+          @action="router.push('/enrollments/new')"
+        />
       </section>
 
-      <section v-if="activity.length" class="home-section">
-        <div class="home-section__head">
-          <h2 class="home-section__title">Recent activity</h2>
+      <section v-else-if="attention.length" class="or-stack">
+        <h2 class="or-heading">Needs attention</h2>
+        <button
+          v-for="row in attention"
+          :key="row.id"
+          type="button"
+          class="or-list-card person-row"
+          @click="router.push(`/enrollments/${row.id}`)"
+        >
+          <span class="person-row__who">
+            <ProfileMark :label="row.label" :type="row.type" />
+            <span class="or-list-card__title">{{ row.label }}</span>
+          </span>
+          <span class="or-list-card__meta">
+            <TypeTag :type="row.type" />
+            <StatusPill :enrollment="row" />
+            <span>{{ row.sample_count }} samples</span>
+          </span>
+        </button>
+      </section>
+
+      <section v-if="activity.length" class="or-stack">
+        <div class="section-head">
+          <h2 class="or-heading">Recent activity</h2>
           <NButton text type="primary" @click="router.push('/logs')">View all</NButton>
         </div>
         <ul class="activity">
-          <li v-for="row in activity" :key="row.id" class="activity__row">
-            <span class="activity__event">{{ formatLogEvent(row.event) }}</span>
-            <span class="activity__label">{{ row.label || row.summary || "—" }}</span>
-            <NTag v-if="row.dry_run" size="small" round :bordered="false">Practice</NTag>
-            <time class="activity__time">{{ new Date(row.created_at).toLocaleString() }}</time>
+          <li v-for="row in activity" :key="row.id">
+            <button type="button" class="activity__row" @click="router.push('/logs')">
+              <ProfileMark :label="row.label || 'Event'" size="sm" />
+              <span class="activity__copy">
+                <span>{{ verdictFromLog(row).sentence }}</span>
+                <span class="activity__meta">
+                  <Chip v-if="row.dry_run">Practice</Chip>
+                  <TimeAgo :value="row.created_at" />
+                </span>
+              </span>
+            </button>
           </li>
         </ul>
       </section>
@@ -140,91 +246,132 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.home {
+.setup-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--or-section-gap);
+  gap: 4px;
 }
 
-.home :deep(.app-page-header) {
-  margin-bottom: 0;
+.setup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
 }
 
-.home-section {
+.is-done {
+  color: var(--or-success);
+}
+
+.is-todo {
+  color: var(--or-text-3);
+}
+
+.is-done-label {
+  color: var(--or-text-3);
+  text-decoration: line-through;
+}
+
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--or-space-3);
+}
+
+.status-tile {
   display: flex;
   flex-direction: column;
-  gap: var(--or-inline-gap);
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
+  background: var(--or-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.home-section__head {
+.status-tile:hover {
+  border-color: var(--or-accent);
+}
+
+.status-tile strong {
+  font-size: var(--or-text-body);
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
 }
 
-.home-section__title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.home-empty {
-  margin: 0;
-  color: var(--n-text-color-3);
-  font-size: 0.9rem;
-}
-
-.home-list {
+.person-row__who {
   display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .activity {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--or-line, var(--n-border-color));
-  border-radius: var(--or-radius);
-  background: var(--or-surface, var(--n-color));
+  border: 1px solid var(--or-line);
+  border-radius: var(--or-radius-md);
+  background: var(--or-surface);
 }
 
 .activity__row {
-  display: grid;
-  grid-template-columns: minmax(120px, 180px) 1fr auto auto;
+  display: flex;
+  align-items: flex-start;
   gap: 12px;
-  align-items: center;
+  width: 100%;
   padding: 12px 14px;
-  border-top: 1px solid var(--or-line, var(--n-border-color));
+  border: 0;
+  border-top: 1px solid var(--or-line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.activity__row:first-child {
-  border-top: none;
+.activity li:first-child .activity__row {
+  border-top: 0;
 }
 
-.activity__event {
-  font-weight: 600;
-}
-
-.activity__label {
+.activity__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--n-text-color-2);
 }
 
-.activity__time {
-  color: var(--n-text-color-3);
-  font-size: 0.8125rem;
+.activity__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-@media (max-width: 768px) {
-  .activity__row {
-    grid-template-columns: 1fr auto;
-  }
-
-  .activity__time {
-    grid-column: 1 / -1;
+@media (max-width: 899px) {
+  .status-strip {
+    grid-template-columns: 1fr 1fr;
   }
 }
 </style>

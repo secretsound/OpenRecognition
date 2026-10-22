@@ -1,5 +1,6 @@
 # ONNX weights (download with tools/download_models.py)
 model-packs/**/*.onnx
+models/**/*.onnx
 
 # Python / tooling
 .venv

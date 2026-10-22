@@ -35,9 +35,9 @@ docker run -d --name openrecognition \
 | Mount | Contents |
 |-------|----------|
 | `/data` | Gallery database and accounts |
-| `/models` | Pack manifests and downloaded ONNX weights |
+| `/models` | Downloaded ONNX weights |
 
-The first start copies `model-pack.yaml` into `/models/<pack>/` when that file is not already there. Files already on the mount are left alone. Weight downloads from the console go to `/models`, so they survive a new container.
+Weight downloads from the console go to `/models`, so they survive a new container. Files already on the mount are left alone.
 
 | Tag | What it is |
 |-----|------------|
@@ -56,8 +56,8 @@ Every variable uses the prefix `OPENRECOGNITION_`. The image already sets the pa
 | `HOST` | `0.0.0.0` | Address the API binds |
 | `PORT` | `8080` | API and console port |
 | `DATA_DIR` | `/data` | Gallery, password, and API key |
-| `MODEL_PACKS_DIR` | `/models` | Writable model directory |
-| `PACK` | `edge` | `edge`, `standard`, `pro`, or `home` |
+| `MODELS_DIR` | `/models` | Where new downloads are stored |
+| `MODEL_PACKS_DIR` | `/models` | Older pack folders are still searched when this path differs from `MODELS_DIR` |
 | `AUTH_REQUIRED` | `true` | Require an API key or console session |
 | `WEB_ENABLED` | `true` | Serve the console at `/` |
 | `DOCS_ENABLED` | `true` | Serve `/docs`, `/redoc`, and `/openapi.json` |
@@ -107,4 +107,4 @@ Off until you set `WYOMING_ENABLED=true`. Publish `10301` when you turn it on.
 | `VIDEO_RECOGNIZE_ASYNC_MAX_SEC` | `300` | Longest clip accepted on an asynchronous recognize call |
 | `VIDEO_MAX_UPLOAD_BYTES` | `104857600` | Largest upload, 100 MiB |
 
-`SHIPPED_PACKS_DIR` (`/app/model-packs`) and `WEB_DIST` (`/app/web/dist`) are set by the image. They locate the pack manifests shipped in the image and the built console. Change `MODEL_PACKS_DIR` when the writable model mount is not `/models`.
+`WEB_DIST` (`/app/web/dist`) is set by the image. It locates the built console. Change `MODELS_DIR` when the writable model mount is not `/models`.

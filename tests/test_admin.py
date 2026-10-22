@@ -14,7 +14,8 @@ def test_admin_settings(client, auth_headers):
     r = client.get("/v1/admin/settings", headers=auth_headers)
     assert r.status_code == 200
     body = r.json()
-    assert "pack" in body
+    assert body["hardware"]["effective"] in ("pi", "mini", "desktop")
+    assert body["models_dir"]
     assert "feature_flags" in body
     assert "system" in body
     assert body["system"]["python_version"]

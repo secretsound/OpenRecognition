@@ -54,6 +54,18 @@ def accept_threshold(item: dict, min_confidence: float) -> float:
     return max(min_confidence, enrollment)
 
 
+def wyoming_threshold(item: dict, min_confidence: float) -> float:
+    """Similarity required to include this identity on the Wyoming path.
+
+    A per-enrollment Wyoming setting replaces the default so a noisy
+    microphone can use a lower bar without changing everyone else.
+    """
+    raw = item.get("wyoming_min_confidence")
+    if raw is not None:
+        return float(raw)
+    return accept_threshold(item, min_confidence)
+
+
 def gallery_for_model(gallery: list[dict], model_version: str | None) -> list[dict]:
     """Keep gallery rows for this embedding model.
 
@@ -82,8 +94,10 @@ def rank_gallery_matches(
     modality: str,
     *,
     top_k: int = 8,
+    threshold_fn=None,
 ) -> list[dict]:
     """Top gallery hits by similarity, whether or not they pass threshold."""
+    thresh_of = threshold_fn or accept_threshold
     ranked: list[dict] = []
     for item in gallery:
         if item.get("type") not in etypes:
@@ -91,7 +105,7 @@ def rank_gallery_matches(
         if item["vector"].size != vector.size:
             continue
         sim = cosine_similarity(vector, item["vector"])
-        thresh = accept_threshold(item, min_confidence)
+        thresh = thresh_of(item, min_confidence)
         ranked.append(
             {
                 "entity_id": item["id"],

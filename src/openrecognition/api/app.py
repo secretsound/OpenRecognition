@@ -22,6 +22,7 @@ from openrecognition.api.routes import (
     models_admin,
     auth_routes,
     capabilities,
+    console,
     enrollments,
     events,
     gallery_routes,
@@ -92,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth_routes.router)
     app.include_router(capabilities.router)
+    app.include_router(console.router)
     app.include_router(enrollments.router)
     app.include_router(recognize.router)
     app.include_router(integrations.router)
@@ -118,7 +120,7 @@ def create_app() -> FastAPI:
             if not index_path.is_file():
                 raise HTTPException(
                     status_code=404,
-                    detail="Web UI not built — run: cd src/web && npm run build",
+                    detail="Web UI not built — run: cd src/web && deno task build",
                 )
             return FileResponse(index_path)
 

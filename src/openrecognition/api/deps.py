@@ -7,6 +7,7 @@ from fastapi import Depends, Header, Request
 
 from openrecognition.api.errors import forbidden, maintenance, unauthorized
 from openrecognition.app_state import AppState
+from openrecognition.auth.sessions import role_from_scopes
 
 
 def get_state(request: Request) -> AppState:
@@ -48,12 +49,13 @@ async def get_auth(
     if state.maintenance_mode and not request.url.path.startswith("/v1/admin") and request.url.path not in exempt:
         raise maintenance()
     if not state.settings.auth_required:
-        return {"scopes": ["admin", "read", "enroll", "recognize"], "name": "dev"}
+        scopes = ["admin", "read", "enroll", "recognize"]
+        return {"scopes": scopes, "name": "dev", "role": "admin"}
     raw = _extract_key(authorization, x_api_key)
     if raw:
         auth = state.api_keys.authenticate(raw)
         if auth:
-            return auth
+            return {**auth, "role": role_from_scopes(auth.get("scopes"))}
         raise unauthorized()
     if request.url.path in ("/health", "/health/live", "/health/ready"):
         return None
@@ -61,7 +63,12 @@ async def get_auth(
     if cookie:
         sess = state.sessions.get_session(cookie)
         if sess:
-            return {"scopes": sess["scopes"], "name": sess["username"], "user_id": sess["user_id"]}
+            return {
+                "scopes": sess["scopes"],
+                "name": sess["username"],
+                "user_id": sess["user_id"],
+                "role": sess["role"],
+            }
     raise unauthorized()
 
 

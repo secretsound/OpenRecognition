@@ -6,8 +6,6 @@ import {
   NSelect,
   NInput,
   NTag,
-  NSkeleton,
-  NPagination,
   NSpace,
   NIcon,
   useMessage,
@@ -16,24 +14,34 @@ import type { DataTableColumns, SelectOption } from "naive-ui";
 import { RefreshOutline, DocumentTextOutline, EyeOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
 import type { RecognitionLogListOut, RecognitionLogOut } from "@/types/api";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import FilterBar from "@/components/kit/FilterBar.vue";
+import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import LogDetailModal from "@/components/LogDetailModal.vue";
+import TimeAgo from "@/components/kit/TimeAgo.vue";
 import { formatLogEvent, formatLogMedia } from "@/utils/logEvent";
+import { useEventStream } from "@/composables/useEventStream";
+
+const PAGE_SIZE = 40;
 
 const message = useMessage();
 const loading = ref(true);
+const loadingMore = ref(false);
 const loadError = ref<string | null>(null);
 const rows = ref<RecognitionLogOut[]>([]);
 const total = ref(0);
-const page = ref(1);
-const pageSize = ref(50);
 
 const eventFilter = ref<string | null>(null);
 const modalityFilter = ref<string | null>(null);
 const labelFilter = ref("");
 const selectedLog = ref<RecognitionLogOut | null>(null);
 const showDetail = ref(false);
+
+const hasMore = computed(() => rows.value.length < total.value);
+const filtersActive = computed(
+  () => !!eventFilter.value || !!modalityFilter.value || !!labelFilter.value.trim(),
+);
 
 const eventOptions: SelectOption[] = [
   { label: "All events", value: "" },
@@ -91,21 +99,33 @@ function formatActor(row: RecognitionLogOut) {
   return row.actor_name ? `${row.actor_name}${kind ? ` (${kind})` : ""}` : kind || "—";
 }
 
+function queryParams(offset: number) {
+  const params = new URLSearchParams({
+    limit: String(PAGE_SIZE),
+    offset: String(offset),
+  });
+  if (eventFilter.value) params.set("event", eventFilter.value);
+  if (modalityFilter.value) params.set("modality", modalityFilter.value);
+  const label = labelFilter.value.trim();
+  if (label) params.set("label", label);
+  return params;
+}
+
 const columns: DataTableColumns<RecognitionLogOut> = [
   {
     title: "Time",
     key: "created_at",
-    width: 168,
+    width: 120,
     render(row) {
-      return new Date(row.created_at).toLocaleString();
+      return h(TimeAgo, { value: row.created_at });
     },
   },
   {
     title: "Event",
     key: "event",
-    width: 168,
+    width: 188,
     render(row) {
-      return h(NSpace, { size: 4, align: "center" }, () => [
+      return h(NSpace, { size: 6, align: "center", wrap: false }, () => [
         h(
           NTag,
           { size: "small", type: eventTagType(row.event), bordered: false, round: true },
@@ -120,7 +140,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
   {
     title: "Label",
     key: "label",
-    minWidth: 120,
+    minWidth: 140,
     ellipsis: { tooltip: true },
     render(row) {
       return row.label ?? "—";
@@ -129,7 +149,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
   {
     title: "Details",
     key: "summary",
-    minWidth: 160,
+    minWidth: 180,
     ellipsis: { tooltip: true },
     render(row) {
       return row.summary ?? row.reason ?? "—";
@@ -138,7 +158,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
   {
     title: "Score",
     key: "confidence",
-    width: 80,
+    width: 72,
     render(row) {
       const text = formatConfidence(row);
       if (text === "n/a") {
@@ -150,7 +170,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
   {
     title: "Media",
     key: "modality",
-    width: 100,
+    width: 88,
     render(row) {
       return formatLogMedia(row.modality);
     },
@@ -167,8 +187,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
   {
     title: "",
     key: "actions",
-    width: 52,
-    fixed: "right",
+    width: 48,
     render(row) {
       return h(
         NButton,
@@ -182,66 +201,102 @@ const columns: DataTableColumns<RecognitionLogOut> = [
           },
         },
         {
-          icon: () => h(NIcon, null, () => h(EyeOutline)),
+          icon: () => h(NIcon, { size: 18 }, () => h(EyeOutline)),
         },
       );
     },
   },
 ];
 
-const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
-
-async function load() {
-  loading.value = true;
+async function fetchPage(append: boolean) {
+  if (append) {
+    if (loadingMore.value || !hasMore.value) return;
+    loadingMore.value = true;
+  } else {
+    loading.value = true;
+  }
   try {
-    const params = new URLSearchParams({
-      limit: String(pageSize.value),
-      offset: String((page.value - 1) * pageSize.value),
-    });
-    if (eventFilter.value) params.set("event", eventFilter.value);
-    if (modalityFilter.value) params.set("modality", modalityFilter.value);
-    const label = labelFilter.value.trim();
-    if (label) params.set("label", label);
-
-    const res = await api<RecognitionLogListOut>(`/v1/admin/logs?${params}`);
-    rows.value = res.items;
+    const offset = append ? rows.value.length : 0;
+    const res = await api<RecognitionLogListOut>(`/v1/admin/logs?${queryParams(offset)}`);
+    if (append) {
+      const seen = new Set(rows.value.map((row) => row.id));
+      rows.value = [...rows.value, ...res.items.filter((row) => !seen.has(row.id))];
+    } else {
+      rows.value = res.items;
+    }
     total.value = res.total;
     loadError.value = null;
   } catch (e) {
     loadError.value = loadFailureMessage(e, "Failed to load logs");
-    message.error(loadError.value);
+    if (!append) message.error(loadError.value);
   } finally {
     loading.value = false;
+    loadingMore.value = false;
+  }
+}
+
+function load() {
+  return fetchPage(false);
+}
+
+function loadMore() {
+  return fetchPage(true);
+}
+
+function onTableScroll(e: Event) {
+  const el = e.target as HTMLElement | null;
+  if (!el || loadingMore.value || !hasMore.value) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+    void loadMore();
   }
 }
 
 function applyFilters() {
-  page.value = 1;
   void load();
 }
 
-function onPageChange(p: number) {
-  page.value = p;
-  void load();
+function clearFilters() {
+  eventFilter.value = null;
+  modalityFilter.value = null;
+  labelFilter.value = "";
+  applyFilters();
 }
 
-function onPageSizeChange(size: number) {
-  pageSize.value = size;
-  page.value = 1;
-  void load();
+function rowMatchesFilters(row: RecognitionLogOut) {
+  if (eventFilter.value && row.event !== eventFilter.value) return false;
+  if (modalityFilter.value && row.modality !== modalityFilter.value) return false;
+  const label = labelFilter.value.trim().toLowerCase();
+  if (label && !(row.label ?? "").toLowerCase().includes(label)) return false;
+  return true;
 }
+
+useEventStream((event) => {
+  const log = event.log;
+  if (!log || event.type !== "recognition.log") return;
+  if (!rowMatchesFilters(log)) return;
+  if (rows.value.some((row) => row.id === log.id)) return;
+  rows.value = [log, ...rows.value];
+  total.value += 1;
+});
 
 onMounted(load);
 </script>
 
 <template>
-  <div>
-    <AppPageHeader
+  <div class="or-page logs-page">
+    <PageHeader
       title="Activity"
       description="What this server recognized, enrolled, or rejected. Media is not stored here."
     >
+      <template #meta>
+        <span v-if="rows.length" class="or-footer-count">
+          {{ rows.length }}{{ hasMore ? ` of ${total}` : "" }}
+          event{{ total === 1 ? "" : "s" }}
+          <template v-if="loadingMore"> · loading more</template>
+        </span>
+      </template>
       <template #action>
-        <NButton quaternary :loading="loading" @click="load">
+        <NButton quaternary :loading="loading && !loadingMore" @click="load">
           <template #icon>
             <NIcon><RefreshOutline /></NIcon>
           </template>
@@ -249,121 +304,100 @@ onMounted(load);
         </NButton>
       </template>
       <template #extra>
-        <NSpace wrap :size="12" align="center">
-        <NSelect
-          v-model:value="eventFilter"
-          :options="eventOptions"
-          clearable
-          placeholder="Event"
-          style="width: 160px"
-          @update:value="applyFilters"
-        />
-        <NSelect
-          v-model:value="modalityFilter"
-          :options="modalityOptions"
-          clearable
-          placeholder="Media"
-          style="width: 160px"
-          @update:value="applyFilters"
-        />
-        <NInput
-          v-model:value="labelFilter"
-          placeholder="Filter by label"
-          clearable
-          style="width: 200px"
-          @keyup.enter="applyFilters"
-          @clear="applyFilters"
-        />
-        <NButton secondary @click="applyFilters">Apply</NButton>
-        </NSpace>
-      </template>
-    </AppPageHeader>
-
-    <NSpace vertical :size="16">
-      <NSkeleton v-if="loading && !rows.length" text :repeat="6" />
-      <EmptyState
-        v-else-if="!loading && loadError"
-        title="Couldn't load activity"
-        :description="loadError"
-        action-label="Retry"
-        @action="load"
-      />
-      <EmptyState
-        v-else-if="!loading && !rows.length"
-        title="No activity yet"
-        description="Add samples or try a match. Events show up here."
-      >
-        <template #icon>
-          <NIcon :size="48" depth="3"><DocumentTextOutline /></NIcon>
-        </template>
-      </EmptyState>
-      <template v-else>
-        <div class="or-list-cards">
-          <button
-            v-for="row in rows"
-            :key="row.id"
-            type="button"
-            class="or-list-card"
-            @click="openDetail(row)"
-          >
-            <span class="or-list-card__title">{{ row.label || formatEvent(row.event) }}</span>
-            <span class="or-list-card__meta">
-              <span>{{ formatEvent(row.event) }}</span>
-              <span>{{ formatLogMedia(row.modality) }}</span>
-              <span>{{ formatConfidence(row) }}</span>
-            </span>
-          </button>
-        </div>
-        <div class="or-table-wrap or-table-desktop">
-        <NDataTable
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :bordered="false"
-          size="medium"
-          :row-key="(row: RecognitionLogOut) => row.id"
-          :row-props="(row: RecognitionLogOut) => ({
-            style: 'cursor: pointer',
-            onClick: () => openDetail(row),
-          })"
-        />
-        </div>
-        <LogDetailModal v-model:show="showDetail" :log="selectedLog" />
-        <div class="logs-footer">
-          <span class="logs-total">{{ total }} event{{ total === 1 ? "" : "s" }}</span>
-          <NPagination
-            v-if="total > pageSize"
-            :page="page"
-            :page-count="pageCount"
-            :page-size="pageSize"
-            show-size-picker
-            :page-sizes="[25, 50, 100]"
-            @update:page="onPageChange"
-            @update:page-size="onPageSizeChange"
+        <FilterBar :active="filtersActive" @clear="clearFilters">
+          <NSelect
+            v-model:value="eventFilter"
+            :options="eventOptions"
+            clearable
+            size="small"
+            placeholder="Event"
+            style="width: 148px"
+            @update:value="applyFilters"
           />
-        </div>
+          <NSelect
+            v-model:value="modalityFilter"
+            :options="modalityOptions"
+            clearable
+            size="small"
+            placeholder="Media"
+            style="width: 132px"
+            @update:value="applyFilters"
+          />
+          <NInput
+            v-model:value="labelFilter"
+            placeholder="Filter by label"
+            clearable
+            size="small"
+            style="width: 180px"
+            @keyup.enter="applyFilters"
+            @clear="applyFilters"
+          />
+        </FilterBar>
       </template>
-    </NSpace>
+    </PageHeader>
+
+    <ContentSkeleton v-if="loading && !rows.length" variant="table" />
+    <EmptyState
+      v-else-if="!loading && loadError && !rows.length"
+      title="Couldn't load activity"
+      :description="loadError"
+      action-label="Retry"
+      @action="load"
+    />
+    <EmptyState
+      v-else-if="!loading && !rows.length"
+      title="No activity yet"
+      description="Add samples or recognize something. Events show up here."
+    >
+      <template #icon>
+        <NIcon :size="48" depth="3"><DocumentTextOutline /></NIcon>
+      </template>
+    </EmptyState>
+    <div v-else class="or-table-wrap logs-table">
+      <NDataTable
+        :columns="columns"
+        :data="rows"
+        :loading="loading && !loadingMore"
+        :bordered="false"
+        flex-height
+        virtual-scroll
+        :header-height="44"
+        :min-row-height="48"
+        :scroll-x="980"
+        size="medium"
+        :row-key="(row: RecognitionLogOut) => row.id"
+        :row-props="(row: RecognitionLogOut) => ({
+          style: 'cursor: pointer',
+          onClick: () => openDetail(row),
+        })"
+        @scroll="onTableScroll"
+      />
+    </div>
+    <LogDetailModal v-model:show="showDetail" :log="selectedLog" />
   </div>
 </template>
 
 <style scoped>
-.logs-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 8px;
+.logs-page {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--or-space-4);
 }
 
-.logs-total {
-  font-size: 0.875rem;
-  color: var(--n-text-color-3);
+.logs-table {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.logs-table :deep(.n-data-table) {
+  flex: 1;
+  height: 100%;
 }
 
 :deep(.muted-cell) {
   color: var(--n-text-color-3);
-  font-size: 0.8125rem;
 }
 </style>

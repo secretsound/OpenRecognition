@@ -1,12 +1,9 @@
 """Model download catalog and helpers."""
 
-from pathlib import Path
-
 from openrecognition.models_download import (
     MODEL_CATALOG,
     catalog_for_pack,
     list_catalog,
-    list_categories,
     list_presets,
 )
 
@@ -21,42 +18,49 @@ def test_catalog_has_sources():
     assert by_key["face_embedding"].category == "match_face"
     assert by_key["speaker_embedding"].version == "wespeaker-resnet34-v1"
     assert by_key["speaker_embedding"].onnx["embed_dim"] == 256
+    assert by_key["speaker_campplus"].onnx["embed_dim"] == 512
+    assert by_key["speaker_campplus"].hardware == "pi"
+    assert by_key["speaker_resnet293"].hardware == "desktop"
     assert by_key["visual_reid"].onnx["backend"] == "classifier"
     assert by_key["visual_reid"].onnx["embed_dim"] == 1000
 
 
 def test_list_catalog_includes_category_and_tier():
-    row = next(r for r in list_catalog(pack="edge") if r["key"] == "speaker_embedding")
+    row = next(r for r in list_catalog() if r["key"] == "speaker_embedding")
     assert row["category"] == "voice_match"
     assert row["tier"] == "essential"
     assert row["label"] == "WeSpeaker ResNet34"
     assert row["version"] == "wespeaker-resnet34-v1"
     assert row["onnx"]["embed_dim"] == 256
-    assert row["hardware"] == "pi"
+    assert row["hardware"] == "mini"
     assert "Voice enrollments" in row["enables"][0]
 
 
-def test_list_presets_for_edge():
-    presets = list_presets(pack="edge")
+def test_list_presets_cover_categories():
+    presets = list_presets()
     ids = {p["id"] for p in presets}
     assert "voice" in ids
     assert "face" in ids
-    assert presets[0]["keys"]
+    voice = next(p for p in presets if p["id"] == "voice")
+    assert "silero_vad" in voice["keys"]
+    assert "speaker_embedding" in voice["keys"]
 
 
-def test_list_catalog_edge_pack():
-    rows = list_catalog(pack="edge")
+def test_list_catalog_has_the_builtin_set():
+    rows = list_catalog()
     keys = {r["key"] for r in rows}
     assert "silero_vad" in keys
     assert "speaker_embedding" in keys
+    assert "speaker_campplus" in keys
     assert "face_detector" in keys
     assert "face_embedding" in keys
+    assert "face_w600k_r50" in keys
     assert "animal_detector" in keys
     assert "visual_reid" in keys
     assert "audio_gate_classifier" in keys
 
 
-def test_catalog_for_pack():
+def test_catalog_for_pack_still_lists_shared_models():
     edge = catalog_for_pack("edge")
     assert len(edge) >= 2
     assert all("edge" in m.packs for m in edge)

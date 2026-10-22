@@ -43,7 +43,7 @@ from openrecognition.integrator.wyoming.processor import (
     gate_utterance,
     identify_wav,
 )
-from openrecognition.integrator.wyoming.transcript_tag import tag_transcript_text
+from openrecognition.integrator.wyoming.transcript_tag import format_transcript_message
 from openrecognition.integrator.wyoming.upstream import forward_pcm_to_upstream
 
 if TYPE_CHECKING:
@@ -63,19 +63,23 @@ class SpeakerProxyHandler(AsyncEventHandler):
         upstream_uri: str,
         *,
         min_confidence: float = 0.75,
-        require_speaker_match: bool = True,
-        block_on_gate_reject: bool = True,
-        tag_speaker: bool = False,
+        require_speaker_match: bool = False,
+        block_on_gate_reject: bool = False,
+        tag_speaker: bool = True,
+        include_confidence: bool = True,
+        include_candidates: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.wyoming_info = wyoming_info
         self.app_state = app_state
         self.upstream_uri = upstream_uri
-        self.min_confidence = min_confidence
-        self.require_speaker_match = require_speaker_match
-        self.block_on_gate_reject = block_on_gate_reject
-        self.tag_speaker = tag_speaker
+        self._min_confidence = min_confidence
+        self._require_speaker_match = require_speaker_match
+        self._block_on_gate_reject = block_on_gate_reject
+        self._tag_speaker = tag_speaker
+        self._include_confidence = include_confidence
+        self._include_candidates = include_candidates
 
         self._pcm = bytearray()
         self._rate = 16000
@@ -87,6 +91,42 @@ class SpeakerProxyHandler(AsyncEventHandler):
         self._pending_upstream: list[Any] = []
         self._relay_upstream = False
         self._relay_context: dict[str, Any] = {}
+
+    def _live_bool(self, name: str, fallback: bool) -> bool:
+        bridge = getattr(self.app_state, "wyoming", None)
+        value = getattr(bridge, name, None) if bridge is not None else None
+        return value if isinstance(value, bool) else fallback
+
+    def _live_float(self, name: str, fallback: float) -> float:
+        bridge = getattr(self.app_state, "wyoming", None)
+        value = getattr(bridge, name, None) if bridge is not None else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return fallback
+
+    @property
+    def min_confidence(self) -> float:
+        return self._live_float("min_confidence", self._min_confidence)
+
+    @property
+    def require_speaker_match(self) -> bool:
+        return self._live_bool("require_speaker_match", self._require_speaker_match)
+
+    @property
+    def block_on_gate_reject(self) -> bool:
+        return self._live_bool("block_on_gate_reject", self._block_on_gate_reject)
+
+    @property
+    def tag_speaker(self) -> bool:
+        return self._live_bool("tag_speaker", self._tag_speaker)
+
+    @property
+    def include_confidence(self) -> bool:
+        return self._live_bool("include_confidence", self._include_confidence)
+
+    @property
+    def include_candidates(self) -> bool:
+        return self._live_bool("include_candidates", self._include_candidates)
 
     def _reset_stream(self) -> None:
         self._pcm = bytearray()
@@ -117,9 +157,17 @@ class SpeakerProxyHandler(AsyncEventHandler):
         )
         return wyoming_transcript_context(details)
 
-    def _tag_text(self, text: str, result: UtteranceResult) -> str:
+    def _format_text(self, text: str, result: UtteranceResult) -> str:
         speaker = result.label if result.accepted and result.label else None
-        return tag_transcript_text(text, enabled=self.tag_speaker, speaker=speaker)
+        return format_transcript_message(
+            text,
+            speaker=speaker,
+            confidence=result.confidence,
+            candidates=result.candidates,
+            tag_speaker=self.tag_speaker,
+            include_confidence=self.include_confidence,
+            include_candidates=self.include_candidates,
+        )
 
     @staticmethod
     def _merge_context(
@@ -408,7 +456,7 @@ class SpeakerProxyHandler(AsyncEventHandler):
             text = ""
             await self._cancel_task(upstream_task)
 
-        text = self._tag_text(text, result)
+        text = self._format_text(text, result)
         details["transcript"] = text
         details["upstream_skipped"] = False
         context = self._merge_context(upstream_context, context)

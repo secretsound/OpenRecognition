@@ -7,6 +7,7 @@ def test_auth_me_api_key(client, auth_headers):
     body = r.json()
     assert body["credential_type"] == "api_key"
     assert "admin" in body["scopes"]
+    assert body["role"] == "admin"
     assert len(body["mcp_tools"]) == 9
 
 
@@ -25,3 +26,4 @@ def test_auth_me_recognize_only_key(client, auth_headers):
     assert me.status_code == 200
     names = {t["name"] for t in me.json()["mcp_tools"]}
     assert names == {"list_enrollments"}
+    assert me.json()["role"] == "viewer"

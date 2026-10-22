@@ -23,8 +23,8 @@ from openrecognition.integrator.webhooks import WebhookService
 from openrecognition.runtime_settings import RuntimeSettingsStore
 
 RESTART_REQUIRED_KEYS = (
-    "pack",
     "data_dir",
+    "models_dir",
     "model_packs_dir",
     "host",
     "port",
@@ -53,6 +53,8 @@ class AppState:
     mqtt: MqttBridge
     wyoming: WyomingBridge
     maintenance_mode: bool = False
+    hardware_override: str | None = None
+    thread_override: int | None = None
     default_min_confidence: float = 0.75
     default_return_unknown: bool = True
     default_include_sound_events: bool = False
@@ -82,6 +84,13 @@ class AppState:
             "mqtt_host": s.mqtt_host,
             "mqtt_port": s.mqtt_port,
             "mqtt_topic_prefix": s.mqtt_topic_prefix,
+            "mqtt_username": s.mqtt_username,
+            "mqtt_password": s.mqtt_password,
+            "mqtt_client_id": s.mqtt_client_id,
+            "mqtt_use_tls": s.mqtt_use_tls,
+            "mqtt_tls_insecure": s.mqtt_tls_insecure,
+            "mqtt_qos": s.mqtt_qos,
+            "mqtt_retain": s.mqtt_retain,
             "wyoming_enabled": s.wyoming_enabled,
             "wyoming_uri": s.wyoming_uri,
             "wyoming_upstream_uri": s.wyoming_upstream_uri,
@@ -89,11 +98,15 @@ class AppState:
             "wyoming_require_speaker_match": s.wyoming_require_speaker_match,
             "wyoming_block_on_gate_reject": s.wyoming_block_on_gate_reject,
             "wyoming_tag_speaker": s.wyoming_tag_speaker,
+            "wyoming_include_confidence": s.wyoming_include_confidence,
+            "wyoming_include_candidates": s.wyoming_include_candidates,
             "wyoming_zeroconf_enabled": s.wyoming_zeroconf_enabled,
             "wyoming_zeroconf_name": s.wyoming_zeroconf_name,
             "wyoming_advertise_host": s.wyoming_advertise_host,
             "wyoming_home_assistant_url": s.wyoming_home_assistant_url,
             "model_idle_unload_minutes": s.model_idle_unload_minutes,
+            "hardware_tier": self.hardware_override,
+            "onnx_intra_op_threads": self.thread_override,
         }
 
     def apply_runtime_snapshot(self, data: dict[str, Any]) -> None:
@@ -136,12 +149,40 @@ class AppState:
         if "mqtt_topic_prefix" in data:
             s.mqtt_topic_prefix = str(data["mqtt_topic_prefix"])
             mqtt_changed = True
+        if "mqtt_username" in data:
+            s.mqtt_username = str(data["mqtt_username"])
+            mqtt_changed = True
+        if "mqtt_password" in data:
+            s.mqtt_password = str(data["mqtt_password"])
+            mqtt_changed = True
+        if "mqtt_client_id" in data:
+            s.mqtt_client_id = str(data["mqtt_client_id"]) or "openrecognition"
+            mqtt_changed = True
+        if "mqtt_use_tls" in data:
+            s.mqtt_use_tls = bool(data["mqtt_use_tls"])
+            mqtt_changed = True
+        if "mqtt_tls_insecure" in data:
+            s.mqtt_tls_insecure = bool(data["mqtt_tls_insecure"])
+            mqtt_changed = True
+        if "mqtt_qos" in data:
+            s.mqtt_qos = int(data["mqtt_qos"])
+            mqtt_changed = True
+        if "mqtt_retain" in data:
+            s.mqtt_retain = bool(data["mqtt_retain"])
+            mqtt_changed = True
         if mqtt_changed:
             self.mqtt.configure(
                 host=s.mqtt_host,
                 port=s.mqtt_port,
                 prefix=s.mqtt_topic_prefix,
                 enabled=s.mqtt_enabled,
+                username=s.mqtt_username,
+                password=s.mqtt_password,
+                client_id=s.mqtt_client_id,
+                use_tls=s.mqtt_use_tls,
+                tls_insecure=s.mqtt_tls_insecure,
+                qos=s.mqtt_qos,
+                retain=s.mqtt_retain,
             )
         wyoming_changed = False
         for key in (
@@ -152,6 +193,8 @@ class AppState:
             "wyoming_require_speaker_match",
             "wyoming_block_on_gate_reject",
             "wyoming_tag_speaker",
+            "wyoming_include_confidence",
+            "wyoming_include_candidates",
             "wyoming_zeroconf_enabled",
             "wyoming_zeroconf_name",
             "wyoming_advertise_host",
@@ -169,6 +212,8 @@ class AppState:
                 require_speaker_match=s.wyoming_require_speaker_match,
                 block_on_gate_reject=s.wyoming_block_on_gate_reject,
                 tag_speaker=s.wyoming_tag_speaker,
+                include_confidence=s.wyoming_include_confidence,
+                include_candidates=s.wyoming_include_candidates,
                 zeroconf_enabled=s.wyoming_zeroconf_enabled,
                 zeroconf_name=s.wyoming_zeroconf_name,
                 advertise_host=s.wyoming_advertise_host,
@@ -176,10 +221,49 @@ class AppState:
         if "model_idle_unload_minutes" in data:
             s.model_idle_unload_minutes = int(data["model_idle_unload_minutes"])
             self.pool.idle_unload_minutes = s.model_idle_unload_minutes
+        if "hardware_tier" in data:
+            tier = data["hardware_tier"]
+            self.hardware_override = tier if tier in ("pi", "mini", "desktop") else None
+        if "onnx_intra_op_threads" in data:
+            raw = data["onnx_intra_op_threads"]
+            self.thread_override = int(raw) if raw else None
+            self.apply_threads()
 
     def persist_runtime(self) -> None:
         if self._runtime_store is not None:
             self._runtime_store.save(self.runtime_snapshot())
+
+    def hardware_info(self) -> dict[str, Any]:
+        from openrecognition.hardware import detect_hardware, tier_label
+
+        detected = detect_hardware()
+        override = self.hardware_override if self.hardware_override in ("pi", "mini", "desktop") else None
+        effective = override or detected["tier"]
+        return {
+            "detected": detected["tier"],
+            "override": override,
+            "effective": effective,
+            "label": tier_label(effective),
+            "cpu_count": detected["cpu_count"],
+            "memory_mb": detected["memory_mb"],
+            "arch": detected["arch"],
+        }
+
+    def thread_info(self) -> dict[str, Any]:
+        from openrecognition.hardware import automatic_threads
+
+        hardware = self.hardware_info()
+        automatic = automatic_threads(int(hardware["cpu_count"]))
+        override = self.thread_override
+        value = override if override else automatic
+        return {
+            "value": max(1, min(8, int(value))),
+            "automatic": automatic,
+            "overridden": override is not None,
+        }
+
+    def apply_threads(self) -> None:
+        self.pool.set_intra_op_threads(int(self.thread_info()["value"]))
 
     def resolve_embedding_model_version(self, modality: str, enrollment_type: str) -> str:
         """Model version used for new enrollments given pack + inference backend."""
@@ -205,7 +289,11 @@ class AppState:
         gallery = GalleryStore(db, settings.data_dir)
         api_keys = ApiKeyService(db)
         sessions = SessionService(db, settings.session_ttl_minutes)
-        pool = ModelSessionPool(settings.pack_dir, settings.model_idle_unload_minutes)
+        pool = ModelSessionPool(
+            settings.models_dir,
+            settings.model_idle_unload_minutes,
+            settings.model_search_dirs,
+        )
         pool.load()
         policy = InferencePolicy(pool, settings.inference_backend)
         debounce = DebounceService(db)
@@ -228,6 +316,13 @@ class AppState:
                 settings.mqtt_port,
                 settings.mqtt_topic_prefix,
                 settings.mqtt_enabled,
+                username=settings.mqtt_username,
+                password=settings.mqtt_password,
+                client_id=settings.mqtt_client_id,
+                use_tls=settings.mqtt_use_tls,
+                tls_insecure=settings.mqtt_tls_insecure,
+                qos=settings.mqtt_qos,
+                retain=settings.mqtt_retain,
             ),
             wyoming=WyomingBridge(
                 enabled=settings.wyoming_enabled,
@@ -237,19 +332,21 @@ class AppState:
                 require_speaker_match=settings.wyoming_require_speaker_match,
                 block_on_gate_reject=settings.wyoming_block_on_gate_reject,
                 tag_speaker=settings.wyoming_tag_speaker,
+                include_confidence=settings.wyoming_include_confidence,
+                include_candidates=settings.wyoming_include_candidates,
                 zeroconf_enabled=settings.wyoming_zeroconf_enabled,
                 zeroconf_name=settings.wyoming_zeroconf_name,
                 advertise_host=settings.wyoming_advertise_host,
             ),
             maintenance_mode=settings.maintenance_mode,
-            default_include_sound_events=settings.pack == "home",
         )
         state._runtime_store = RuntimeSettingsStore(settings.data_dir / "runtime_settings.json")
         state.apply_runtime_snapshot(state._runtime_store.load())
         state.gallery.set_version_resolver(state.resolve_embedding_model_version)
-        from openrecognition.gallery.custom_models import apply_overrides
+        from openrecognition.gallery.model_registry import bind_active
 
-        apply_overrides(state.pool, state.db)
+        bind_active(state.pool, state.db)
+        state.apply_threads()
         state.mqtt.connect()
         return state
 
@@ -265,7 +362,7 @@ class AppState:
 
     def capabilities(self) -> dict[str, Any]:
         return {
-            "pack": self.settings.pack,
+            "hardware": self.hardware_info(),
             "version": "0.1.0",
             "recognition_types": [
                 "gate",
@@ -284,6 +381,7 @@ class AppState:
                 "/v1/recognize/video",
                 "/v1/audio/gate",
                 "/v1/enrollments",
+                "/v1/console/overview",
                 "/v1/presence",
                 "/v1/events/stream",
                 "/v1/admin/logs",

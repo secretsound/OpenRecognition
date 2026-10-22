@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NIcon, NAlert, NTag, useMessage } from "naive-ui";
 import { CameraOutline } from "@vicons/ionicons5";
 import { isSecureEnoughForMic } from "@/utils/secureContext";
@@ -13,6 +13,8 @@ const props = withDefaults(
     facingMode?: "user" | "environment";
     maxHeight?: number;
     compact?: boolean;
+    autostart?: boolean;
+    guide?: "face" | "none";
   }>(),
   {
     hint: "Frame your subject, then capture.",
@@ -21,6 +23,8 @@ const props = withDefaults(
     facingMode: "user",
     maxHeight: 280,
     compact: false,
+    autostart: false,
+    guide: "none",
   },
 );
 
@@ -113,6 +117,10 @@ function retake() {
   clearPending();
 }
 
+function discardPending() {
+  clearPending();
+}
+
 function usePhoto() {
   const file = pendingFile.value;
   if (!file) return;
@@ -120,12 +128,25 @@ function usePhoto() {
   clearPending();
 }
 
+watch(
+  () => props.facingMode,
+  (next, prev) => {
+    if (next !== prev && cameraActive.value) {
+      void startCamera();
+    }
+  },
+);
+
+onMounted(() => {
+  if (props.autostart) void startCamera();
+});
+
 onBeforeUnmount(() => {
   clearPending();
   stopCamera();
 });
 
-defineExpose({ stopCamera });
+defineExpose({ stopCamera, discardPending });
 </script>
 
 <template>
@@ -170,6 +191,11 @@ defineExpose({ stopCamera });
           :style="{ maxHeight: `${maxHeight}px` }"
           playsinline
           muted
+        />
+        <div
+          v-if="guide === 'face'"
+          class="camera-guide camera-guide--face"
+          aria-hidden="true"
         />
       </div>
 
@@ -221,12 +247,22 @@ defineExpose({ stopCamera });
 }
 
 .camera-viewport {
+  position: relative;
   border-radius: 8px;
   overflow: hidden;
   background: #000;
   border: 1px solid var(--n-border-color);
   display: flex;
   justify-content: center;
+}
+
+.camera-guide--face {
+  position: absolute;
+  inset: 10% 18%;
+  border: 2px dashed rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.28);
 }
 
 .camera-video {

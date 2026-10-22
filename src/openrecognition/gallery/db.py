@@ -69,9 +69,13 @@ CREATE TABLE IF NOT EXISTS enrollment_media (
 CREATE TABLE IF NOT EXISTS webhook_subscriptions (
     id TEXT PRIMARY KEY,
     url TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    title_template TEXT NOT NULL DEFAULT '',
+    message_template TEXT NOT NULL DEFAULT '',
     events TEXT NOT NULL,
     filters TEXT NOT NULL,
     debounce_seconds INTEGER NOT NULL DEFAULT 30,
+    include_details INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL
 );
 

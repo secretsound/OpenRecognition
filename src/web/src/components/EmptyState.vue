@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import { NButton, NEmpty } from "naive-ui";
+import { NButton, NIcon } from "naive-ui";
 
 defineProps<{
   title: string;
@@ -15,35 +15,42 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="empty-wrap">
-    <NEmpty :description="title" size="large">
-      <template v-if="icon" #icon>
-        <component :is="icon" class="empty-icon" />
-      </template>
-      <template #extra>
-        <p v-if="description" class="empty-desc">{{ description }}</p>
-        <NButton v-if="actionLabel" type="primary" @click="emit('action')">
-          {{ actionLabel }}
-        </NButton>
-      </template>
-    </NEmpty>
+  <div class="or-empty">
+    <div v-if="icon" class="or-empty__icon">
+      <NIcon :size="36" :component="icon" />
+    </div>
+    <h2 class="or-heading">{{ title }}</h2>
+    <p v-if="description" class="or-empty__desc">{{ description }}</p>
+    <NButton v-if="actionLabel" type="primary" @click="emit('action')">
+      {{ actionLabel }}
+    </NButton>
   </div>
 </template>
 
 <style scoped>
-.empty-wrap {
-  padding: 48px 24px;
+.or-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--or-space-3);
+  padding: var(--or-space-12) var(--or-space-6);
 }
 
-.empty-icon {
-  width: 48px;
-  height: 48px;
-  opacity: 0.45;
+.or-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--or-radius-lg);
+  background: var(--or-surface-sunken);
+  color: var(--or-text-3);
 }
 
-.empty-desc {
-  margin: 0 0 16px;
-  color: var(--n-text-color-3);
-  font-size: 0.9rem;
+.or-empty__desc {
+  max-width: 28rem;
+  color: var(--or-text-3);
+  font-size: var(--or-text-body);
+  line-height: var(--or-leading);
 }
 </style>

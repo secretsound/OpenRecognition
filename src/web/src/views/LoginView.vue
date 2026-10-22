@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { NButton, NCard, NForm, NFormItem, NInput, useMessage } from "naive-ui";
+import { NButton, NForm, NFormItem, NInput, useMessage } from "naive-ui";
 import type { FormInst, FormRules } from "naive-ui";
 import { useAuth } from "@/composables/useAuth";
-import { useTheme } from "@/composables/useTheme";
 import { api, ApiError } from "@/api/client";
 import { safeAppPath } from "@/utils/safeRedirect";
 import LogoMark from "@/components/LogoMark.vue";
@@ -16,7 +15,6 @@ const router = useRouter();
 const route = useRoute();
 const message = useMessage();
 const { login, setSession } = useAuth();
-const { isDark } = useTheme();
 
 const formRef = ref<FormInst | null>(null);
 const loading = ref(false);
@@ -42,6 +40,15 @@ const rules: FormRules = {
     },
   ],
 };
+
+const strength = ref("");
+function onPassword(v: string) {
+  model.value.password = v;
+  if (!setupRequired.value) return;
+  if (v.length < 8) strength.value = "Use at least 8 characters";
+  else if (v.length < 12) strength.value = "Okay — longer is better";
+  else strength.value = "Strong enough for this server";
+}
 
 onMounted(async () => {
   try {
@@ -76,7 +83,7 @@ async function onSubmit() {
     message.success(`Welcome, ${res.username}`);
     router.push(safeAppPath(route.query.redirect) ?? "/");
   } catch (e) {
-    message.error(e instanceof ApiError ? e.message : "Login failed");
+    message.error(e instanceof ApiError ? e.message : "Sign in failed");
   } finally {
     loading.value = false;
   }
@@ -84,33 +91,37 @@ async function onSubmit() {
 </script>
 
 <template>
-  <div class="login-page app-page-bg" :class="{ dark: isDark }">
-    <NCard class="login-card" :bordered="true">
+  <div class="login-page">
+    <div class="login-card">
       <div class="login-brand">
         <LogoMark :size="40" />
         <div>
-          <h1>OpenRecognition</h1>
-          <p v-if="setupRequired">Choose the admin account for this server. It is stored in the database on this machine.</p>
-          <p v-else>Enroll people, pets, objects, and sounds, then recognize them from audio, photos, or video.</p>
+          <h1 class="or-title">OpenRecognition</h1>
+          <p v-if="setupRequired" class="or-muted">
+            Create the admin account for this server. It is stored in the database on this machine.
+          </p>
+          <p v-else class="or-muted">
+            Enroll people, pets, objects, and sounds, then recognize them from audio, photos, or video.
+          </p>
         </div>
       </div>
-      <p v-if="checking" class="login-hint">Checking this server…</p>
+      <p v-if="checking" class="or-muted or-small">Checking this server…</p>
       <NForm v-else ref="formRef" :model="model" :rules="rules" size="large" @submit.prevent="onSubmit">
         <NFormItem path="username" label="Username">
-          <NInput
-            v-model:value="model.username"
-            placeholder="Username"
-            autocomplete="username"
-          />
+          <NInput v-model:value="model.username" placeholder="Username" autocomplete="username" />
         </NFormItem>
         <NFormItem path="password" label="Password">
           <NInput
-            v-model:value="model.password"
+            :value="model.password"
             type="password"
             show-password-on="click"
             placeholder="Password"
             :autocomplete="setupRequired ? 'new-password' : 'current-password'"
+            @update:value="onPassword"
           />
+          <p v-if="setupRequired && model.password" class="or-muted or-small" style="margin-top: 8px">
+            {{ strength }}
+          </p>
         </NFormItem>
         <NFormItem v-if="setupRequired" path="confirm" label="Confirm password">
           <NInput
@@ -125,8 +136,10 @@ async function onSubmit() {
           {{ setupRequired ? "Create account" : "Sign in" }}
         </NButton>
       </NForm>
-      <p v-if="!checking && !setupRequired" class="login-hint">Use the admin account for this server.</p>
-    </NCard>
+      <p v-if="!checking && !setupRequired" class="or-muted or-small" style="margin-top: 16px">
+        Use the admin account for this server.
+      </p>
+    </div>
   </div>
 </template>
 
@@ -137,39 +150,28 @@ async function onSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--or-space-6);
+  background: var(--or-bg);
 }
 
 .login-card {
-  width: min(100%, 420px);
-  border-radius: var(--or-radius);
+  width: min(100%, 400px);
+  padding: var(--or-space-8);
+  border-radius: var(--or-radius-lg);
+  background: var(--or-surface);
+  border: 1px solid var(--or-line);
+  box-shadow: var(--or-shadow);
 }
 
 .login-brand {
   display: flex;
   gap: 14px;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: var(--or-space-6);
 }
 
-.login-brand h1 {
-  margin: 0 0 6px;
-  font-size: 1.35rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.login-brand p {
-  margin: 0;
-  color: var(--n-text-color-3);
-  font-size: 0.9rem;
-  line-height: 1.45;
-}
-
-.login-hint {
-  margin: 16px 0 0;
-  color: var(--n-text-color-3);
-  font-size: 0.8rem;
-  line-height: 1.45;
+.login-brand .or-title {
+  font-size: var(--or-text-heading);
+  margin-bottom: 6px;
 }
 </style>

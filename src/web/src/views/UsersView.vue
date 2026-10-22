@@ -9,17 +9,17 @@ import {
   NInput,
   NSelect,
   NTag,
-  NSkeleton,
   NPopconfirm,
   NIcon,
-  NSpace,
   useMessage,
 } from "naive-ui";
 import type { DataTableColumns, FormInst, SelectOption } from "naive-ui";
 import { AddOutline, TrashOutline, CreateOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
 import type { UserOut } from "@/types/api";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import DataList from "@/components/kit/DataList.vue";
+import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import { PeopleCircleOutline } from "@vicons/ionicons5";
 import { ApiError } from "@/api/client";
@@ -227,8 +227,8 @@ onMounted(load);
 </script>
 
 <template>
-  <div>
-    <AppPageHeader
+  <div class="or-page">
+    <PageHeader
       title="Users"
       description="Manage who can sign in to the admin console."
     >
@@ -240,57 +240,57 @@ onMounted(load);
           Add user
         </NButton>
       </template>
-    </AppPageHeader>
+    </PageHeader>
 
-    <NSpace vertical :size="16">
-      <NSkeleton v-if="loading && !rows.length" text :repeat="6" />
-      <EmptyState
-        v-else-if="!loading && loadError"
-        title="Couldn't load users"
-        :description="loadError"
-        action-label="Retry"
-        @action="load"
-      />
-      <EmptyState
-        v-else-if="!loading && rows.length === 0"
-        title="No users"
-        description="Create accounts for teammates who need access to the console."
-        :icon="PeopleCircleOutline"
-        action-label="Add user"
-        @action="showCreate = true"
-      />
-      <template v-else>
-        <div class="or-list-cards">
-          <div v-for="row in rows" :key="row.id" class="or-list-card user-card">
+    <ContentSkeleton v-if="loading && !rows.length" variant="table" />
+    <EmptyState
+      v-else-if="!loading && loadError"
+      title="Couldn't load users"
+      :description="loadError"
+      action-label="Retry"
+      @action="load"
+    />
+    <EmptyState
+      v-else-if="!loading && rows.length === 0"
+      title="No users"
+      description="Create accounts for teammates who need access to the console."
+      :icon="PeopleCircleOutline"
+      action-label="Add user"
+      @action="showCreate = true"
+    />
+    <template v-else>
+      <DataList :items="rows" :get-key="(row) => row.id">
+        <template #table>
+          <div class="or-table-wrap">
+            <NDataTable
+              :columns="columns"
+              :data="rows"
+              :loading="loading"
+              :bordered="false"
+              size="medium"
+              :row-key="(row: UserOut) => row.id"
+            />
+          </div>
+        </template>
+        <template #card="{ item }">
+          <div class="or-list-card user-card">
             <span class="or-list-card__title">
-              {{ row.username }}
-              <NTag v-if="row.username === currentUsername" size="small" round :bordered="false">you</NTag>
+              {{ item.username }}
+              <NTag v-if="item.username === currentUsername" size="small" round :bordered="false">you</NTag>
             </span>
             <span class="or-list-card__meta">
-              <NTag size="small" round :bordered="false" :type="roleTagType(row.role)">{{ row.role }}</NTag>
-              <NButton size="small" quaternary :aria-label="`Edit ${row.username}`" @click="openEdit(row)">
+              <NTag size="small" round :bordered="false" :type="roleTagType(item.role)">{{ item.role }}</NTag>
+              <NButton size="small" quaternary :aria-label="`Edit ${item.username}`" @click="openEdit(item)">
                 Edit
               </NButton>
             </span>
           </div>
-        </div>
-        <div class="or-table-wrap or-table-desktop">
-        <NDataTable
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :bordered="false"
-          size="medium"
-          :row-key="(row: UserOut) => row.id"
-        />
-        </div>
-        <div class="admin-table-footer">
-          <span class="admin-table-total">
-            {{ rows.length }} user{{ rows.length === 1 ? "" : "s" }}
-          </span>
-        </div>
-      </template>
-    </NSpace>
+        </template>
+      </DataList>
+      <p class="or-footer-count">
+        {{ rows.length }} user{{ rows.length === 1 ? "" : "s" }}
+      </p>
+    </template>
 
     <NModal v-model:show="showCreate" preset="card" title="Add user" class="or-modal or-modal--narrow">
       <NForm ref="createFormRef" :model="createForm" label-placement="top">

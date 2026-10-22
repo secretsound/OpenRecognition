@@ -1,3 +1,6 @@
+import { api, ApiError } from "@/api/client";
+import type { JobOut, RecognizeResponse } from "@/types/api";
+
 export function buildRecognizeUrl(
   path: string,
   params: Record<string, string | number | boolean | undefined>,
@@ -11,8 +14,6 @@ export function buildRecognizeUrl(
   const query = qs.toString();
   return query ? `${path}?${query}` : path;
 }
-
-import { ApiError } from "@/api/client";
 
 export async function recognizeFile<T>(
   path: string,
@@ -38,4 +39,31 @@ export async function recognizeFile<T>(
     }
   }
   return res.json() as Promise<T>;
+}
+
+export function createVideoJob(
+  file: File,
+  params: Record<string, string | number | boolean | undefined>,
+): Promise<JobOut> {
+  return recognizeFile<JobOut>("/v1/jobs", file, params);
+}
+
+export function getJob(id: string): Promise<JobOut> {
+  return api<JobOut>(`/v1/jobs/${id}`);
+}
+
+export async function pollJob(
+  id: string,
+  { intervalMs = 750, timeoutMs = 120_000 } = {},
+): Promise<RecognizeResponse> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const job = await getJob(id);
+    if (job.status === "completed" && job.result) return job.result;
+    if (job.status === "failed") {
+      throw new ApiError(500, "JOB_FAILED", job.error || "Video job failed");
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new ApiError(408, "JOB_TIMEOUT", "Video is taking too long. Try a shorter clip.");
 }

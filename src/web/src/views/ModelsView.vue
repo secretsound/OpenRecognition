@@ -11,8 +11,6 @@ import {
   NSelect,
   NInput,
   NDataTable,
-  NCollapse,
-  NCollapseItem,
   NDropdown,
   NModal,
   NForm,
@@ -30,7 +28,8 @@ import type {
   ModelDownloadResponse,
   ModelsStatusOut,
 } from "@/types/api";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import SegmentedControl from "@/components/kit/SegmentedControl.vue";
 import { ApiError } from "@/api/client";
 import { useAuth } from "@/composables/useAuth";
 
@@ -47,9 +46,7 @@ const reloading = ref(false);
 const status = ref<ModelsStatusOut | null>(null);
 const inferenceDraft = ref<InferenceBackend>("auto");
 const savingInference = ref(false);
-const advancedOpen = ref<string[]>([]);
 const search = ref("");
-const recommendationFilter = ref<string | null>(null);
 const groupFilter = ref<string | null>(null);
 const statusFilter = ref<string | null>(null);
 const showModelForm = ref(false);
@@ -61,6 +58,24 @@ const formCategory = ref("voice_match");
 const formVersion = ref("");
 const formUrl = ref("");
 const formOnnx = ref<Record<string, string | number>>({});
+const hardwareDraft = ref("auto");
+const savingHardware = ref(false);
+const threadDraft = ref<number | null>(null);
+const savingThreads = ref(false);
+const showSettings = ref(false);
+const settingsRow = ref<ModelCatalogEntry | null>(null);
+const knobDraft = ref<Record<string, number>>({});
+const contractDraft = ref<Record<string, string | number | boolean>>({});
+const savingKnobs = ref(false);
+const PAGE_SIZE = 16;
+const shownCount = ref(PAGE_SIZE);
+type ModelSection = "recommended" | "catalog" | "settings";
+const sectionTab = ref<ModelSection>("recommended");
+const sectionTabs: { value: ModelSection; label: string }[] = [
+  { value: "recommended", label: "Recommended" },
+  { value: "catalog", label: "All models" },
+  { value: "settings", label: "Settings" },
+];
 
 const settingLabels: Record<string, string> = {
   embed_dim: "Embedding size",
@@ -74,8 +89,6 @@ const settingLabels: Record<string, string> = {
   backend: "File type",
 };
 
-const REC_KEY = "or-model-recommendation";
-
 const inferenceOptions: SelectOption[] = [
   { label: "Automatic", value: "auto" },
   { label: "Downloaded files", value: "onnx" },
@@ -87,27 +100,8 @@ const statusOptions: SelectOption[] = [
   { label: "Not downloaded", value: "missing" },
 ];
 
-function readRecommendation(): string | null {
-  try {
-    return localStorage.getItem(REC_KEY);
-  } catch {
-    return null;
-  }
-}
-
-recommendationFilter.value = readRecommendation();
-
-watch(recommendationFilter, (value) => {
-  try {
-    if (value) localStorage.setItem(REC_KEY, value);
-    else localStorage.removeItem(REC_KEY);
-  } catch {
-    /* the filter still works for this visit */
-  }
-});
-
-const missingCount = computed(
-  () => status.value?.catalog.filter((m) => !m.on_disk).length ?? 0,
+const suggestedMissing = computed(
+  () => status.value?.presets.find((preset) => preset.id === "full")?.missing_keys ?? [],
 );
 
 const catalogByKey = computed(() => {
@@ -118,21 +112,22 @@ const catalogByKey = computed(() => {
   return map;
 });
 
-const recommendations = computed(() => status.value?.recommendations ?? []);
-
-const recommendationOptions = computed<SelectOption[]>(() =>
-  recommendations.value.map((rec) => ({ label: rec.label, value: rec.id })),
-);
-
 const groupOptions = computed<SelectOption[]>(() =>
   [...(status.value?.categories ?? [])]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((cat) => ({ label: cat.label, value: cat.id })),
 );
 
-const selectedRecommendation = computed(
-  () => recommendations.value.find((rec) => rec.id === recommendationFilter.value) ?? null,
-);
+const hardwareOptions = computed<SelectOption[]>(() => {
+  const detected = status.value?.hardware.detected;
+  const detectedLabel = detected ? machineLabel(detected) : "this machine";
+  return [
+    { label: `Automatic (${detectedLabel})`, value: "auto" },
+    { label: "Raspberry Pi", value: "pi" },
+    { label: "Mini PC", value: "mini" },
+    { label: "Desktop", value: "desktop" },
+  ];
+});
 
 function modelTitle(row: ModelCatalogEntry): string {
   return row.label || row.use_for;
@@ -146,13 +141,27 @@ function categoryOrder(id: string): number {
   return status.value?.categories.find((cat) => cat.id === id)?.sort_order ?? 0;
 }
 
-function recommendationText(row: ModelCatalogEntry): string {
-  const matched = recommendations.value.filter((rec) => rec.keys.includes(row.key));
-  if (!matched.length) return "—";
-  if (recommendations.value.length > 0 && matched.length === recommendations.value.length) {
-    return "Every set";
+function machineLabel(tier: string): string {
+  if (tier === "pi") return "Raspberry Pi";
+  if (tier === "mini") return "Mini PC";
+  if (tier === "desktop") return "Desktop";
+  return tier;
+}
+
+function memoryText(mb: number): string {
+  if (!mb) return "memory unknown";
+  if (mb >= 1024) {
+    const gb = mb / 1024;
+    return `${gb >= 10 ? Math.round(gb) : gb.toFixed(1)} GB`;
   }
-  return matched.map((rec) => rec.label).join(", ");
+  return `${mb} MB`;
+}
+
+function fitLabel(row: ModelCatalogEntry): string | null {
+  if (row.suggested) return "Suggested";
+  if (row.fit === "heavier") return "Heavier";
+  if (row.fit === "lighter") return "Lighter";
+  return null;
 }
 
 function missingDeps(row: ModelCatalogEntry): string[] {
@@ -164,15 +173,11 @@ const filteredRows = computed(() => {
   const query = search.value.trim().toLowerCase();
   if (query) {
     list = list.filter((row) =>
-      [modelTitle(row), row.version || "", row.use_for, categoryLabel(row.category), recommendationText(row)]
+      [modelTitle(row), row.version || "", row.use_for, categoryLabel(row.category), machineLabel(row.hardware || "")]
         .join(" ")
         .toLowerCase()
         .includes(query),
     );
-  }
-  if (selectedRecommendation.value) {
-    const keys = new Set(selectedRecommendation.value.keys);
-    list = list.filter((row) => keys.has(row.key));
   }
   if (groupFilter.value) list = list.filter((row) => row.category === groupFilter.value);
   if (statusFilter.value === "ready") list = list.filter((row) => row.on_disk);
@@ -188,16 +193,62 @@ const filteredRows = computed(() => {
 const filtersActive = computed(
   () =>
     search.value.trim().length > 0 ||
-    recommendationFilter.value != null ||
     groupFilter.value != null ||
     statusFilter.value != null,
 );
 
 function clearFilters() {
   search.value = "";
-  recommendationFilter.value = null;
   groupFilter.value = null;
   statusFilter.value = null;
+}
+
+const recommendedRows = computed(() => {
+  const categories = [...(status.value?.categories ?? [])].sort(
+    (a, b) => a.sort_order - b.sort_order,
+  );
+  const rows: ModelCatalogEntry[] = [];
+  for (const category of categories) {
+    const match = status.value?.catalog.find(
+      (row) => row.category === category.id && row.suggested,
+    );
+    if (match) rows.push(match);
+  }
+  return rows;
+});
+
+const tableRows = computed(() => filteredRows.value.slice(0, shownCount.value));
+const hasMoreModels = computed(() => shownCount.value < filteredRows.value.length);
+const modelCountLabel = computed(() => {
+  const shown = tableRows.value.length;
+  const matched = filteredRows.value.length;
+  const total = status.value?.catalog.length ?? matched;
+  const nounCount = shown !== matched ? matched : matched !== total ? total : shown;
+  const noun = `model${nounCount === 1 ? "" : "s"}`;
+  if (shown !== matched) return `${shown} of ${matched} ${noun}`;
+  if (matched !== total) return `${shown} of ${total} ${noun}`;
+  return `${shown} ${noun}`;
+});
+const tableHeight = computed(() => {
+  // Shorter than the first page of rows, so the table body scrolls and can load more.
+  const visible = Math.min(Math.max(tableRows.value.length, 1), 8);
+  return visible * 64 + 48;
+});
+
+watch(filteredRows, () => {
+  shownCount.value = PAGE_SIZE;
+});
+
+function onTableScroll(e: Event) {
+  const el = e.target as HTMLElement | null;
+  if (!el || !hasMoreModels.value) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) {
+    shownCount.value = Math.min(shownCount.value + PAGE_SIZE, filteredRows.value.length);
+  }
+}
+
+function canEdit(row: ModelCatalogEntry): boolean {
+  return (row.knobs?.length ?? 0) > 0 || Object.keys(row.contract ?? {}).length > 0;
 }
 
 const effectiveRuntime = computed(() => {
@@ -233,15 +284,48 @@ function statusText(row: ModelCatalogEntry): string {
   return size ? `Ready · ${size}` : "Ready";
 }
 
+function keptCount(row: ModelCatalogEntry): number {
+  return row.enrollment_count ?? 0;
+}
+
+function canRemove(row: ModelCatalogEntry): boolean {
+  return row.on_disk && keptCount(row) === 0;
+}
+
+function usageText(row: ModelCatalogEntry): string {
+  const kept = keptCount(row);
+  if (row.active && kept > 0) return "In use · matching saved enrollments";
+  if (row.active) return "In use for new samples";
+  if (kept > 0) return `Still matching ${kept} enrollment${kept === 1 ? "" : "s"}`;
+  return statusText(row);
+}
+
+function usageClass(row: ModelCatalogEntry): string {
+  if (row.active) return "is-active-copy";
+  if (keptCount(row) > 0) return "is-kept-copy";
+  return row.on_disk ? "is-ready" : "";
+}
+
+function enableLines(row: ModelCatalogEntry): string[] {
+  const items = row.enables ?? [];
+  if (items.length > 1 && items.every((item) => item.length <= 1)) return [items.join("")];
+  return items;
+}
+
+function applyStatus(next: ModelsStatusOut) {
+  status.value = next;
+  inferenceDraft.value = next.inference_backend;
+  hardwareDraft.value = next.hardware.override ?? "auto";
+  threadDraft.value = next.threads.value;
+  if (settingsRow.value) {
+    settingsRow.value = next.catalog.find((row) => row.key === settingsRow.value?.key) ?? null;
+  }
+}
+
 async function load() {
   loading.value = true;
   try {
-    status.value = await api<ModelsStatusOut>("/v1/admin/models");
-    inferenceDraft.value = status.value.inference_backend;
-    const ids = new Set((status.value.recommendations ?? []).map((rec) => rec.id));
-    if (recommendationFilter.value && !ids.has(recommendationFilter.value)) {
-      recommendationFilter.value = null;
-    }
+    applyStatus(await api<ModelsStatusOut>("/v1/admin/models"));
   } catch (e) {
     message.error(e instanceof ApiError ? e.message : "Failed to load models");
   } finally {
@@ -249,8 +333,9 @@ async function load() {
   }
 }
 
-async function download(keys?: string[], force = false) {
+async function runDownload(keys?: string[], force = false) {
   downloading.value = true;
+  if (keys?.length === 1) downloadingKey.value = keys[0];
   try {
     const res = await api<ModelDownloadResponse>("/v1/admin/models/download", {
       method: "POST",
@@ -272,9 +357,38 @@ async function download(keys?: string[], force = false) {
   }
 }
 
-async function downloadOne(key: string, force = false) {
-  downloadingKey.value = key;
-  await download([key], force);
+function licenseLines(keys: string[]): string[] {
+  const lines: string[] = [];
+  for (const key of keys) {
+    const row = catalogByKey.value.get(key);
+    if (row?.license_warning) lines.push(`${modelTitle(row)} is ${row.license}`);
+  }
+  return lines;
+}
+
+function confirmThenDownload(keys: string[], force = false) {
+  const lines = licenseLines(keys);
+  if (!lines.length) {
+    void runDownload(keys, force);
+    return;
+  }
+  dialog.warning({
+    title: "Check the license",
+    content: `${lines.join(". ")}. Download only if that license works for you.`,
+    positiveText: "Download",
+    negativeText: "Cancel",
+    onPositiveClick: () => runDownload(keys, force),
+  });
+}
+
+function downloadSuggested() {
+  const keys = suggestedMissing.value;
+  if (!keys.length) return;
+  confirmThenDownload(keys);
+}
+
+function downloadOne(key: string, force = false) {
+  confirmThenDownload([key], force);
 }
 
 async function deleteOne(key: string) {
@@ -322,8 +436,8 @@ async function saveInference() {
   }
 }
 
-function openAdvanced() {
-  advancedOpen.value = ["advanced"];
+function openSettingsTab() {
+  sectionTab.value = "settings";
 }
 
 function isCustom(row: ModelCatalogEntry): boolean {
@@ -429,7 +543,159 @@ async function useModel(row: ModelCatalogEntry) {
   }
 }
 
+function requestUse(row: ModelCatalogEntry) {
+  const count = row.reenroll_count ?? 0;
+  if (count > 0) {
+    dialog.warning({
+      title: "Switch model",
+      content: `${count} enrollment${count === 1 ? "" : "s"} still ${count === 1 ? "uses" : "use"} a different model. They keep matching with that model until you add samples for them here. That model stays until every enrollment has moved.`,
+      positiveText: "Use for new samples",
+      negativeText: "Cancel",
+      onPositiveClick: () => useModel(row),
+    });
+    return;
+  }
+  void useModel(row);
+}
+
+async function saveHardware(value: string) {
+  hardwareDraft.value = value;
+  savingHardware.value = true;
+  try {
+    applyStatus(
+      await api<ModelsStatusOut>("/v1/admin/models/hardware", {
+        method: "PUT",
+        json: { tier: value === "auto" ? null : value },
+      }),
+    );
+    window.dispatchEvent(new Event("or-hardware-changed"));
+  } catch (e) {
+    message.error(e instanceof ApiError ? e.message : "Could not update hardware");
+    if (status.value) hardwareDraft.value = status.value.hardware.override ?? "auto";
+  } finally {
+    savingHardware.value = false;
+  }
+}
+
+const threadDirty = computed(
+  () => status.value != null && threadDraft.value != null && threadDraft.value !== status.value.threads.value,
+);
+
+async function saveThreads(reset = false) {
+  savingThreads.value = true;
+  try {
+    await api("/v1/admin/settings", {
+      method: "PATCH",
+      json: { onnx_intra_op_threads: reset ? null : threadDraft.value },
+    });
+    message.success(reset ? "Thread count is automatic" : "Thread count saved");
+    await load();
+  } catch (e) {
+    message.error(e instanceof ApiError ? e.message : "Could not save the thread count");
+  } finally {
+    savingThreads.value = false;
+  }
+}
+
+function sameSetting(next: string | number | boolean | undefined, shipped: string | number | boolean): boolean {
+  if (typeof shipped === "number") return Number(next) === shipped;
+  return next === shipped;
+}
+
+function openSettings(row: ModelCatalogEntry) {
+  settingsRow.value = row;
+  const knobs: Record<string, number> = {};
+  for (const knob of row.knobs ?? []) knobs[knob.key] = knob.value;
+  knobDraft.value = knobs;
+  const contract: Record<string, string | number | boolean> = {};
+  for (const [key, shipped] of Object.entries(row.contract ?? {})) {
+    const current = row.onnx?.[key];
+    if (typeof current === "number" || typeof current === "string" || typeof current === "boolean") {
+      contract[key] = current;
+    } else if (typeof shipped === "number" || typeof shipped === "string" || typeof shipped === "boolean") {
+      contract[key] = shipped;
+    }
+  }
+  contractDraft.value = contract;
+  showSettings.value = true;
+}
+
+async function saveKnobs() {
+  const row = settingsRow.value;
+  if (!row) return;
+  savingKnobs.value = true;
+  try {
+    const overrides: Record<string, string | number | boolean | null> = {};
+    for (const [key, shipped] of Object.entries(row.contract ?? {})) {
+      if (typeof shipped !== "number" && typeof shipped !== "string" && typeof shipped !== "boolean") continue;
+      const next = contractDraft.value[key];
+      overrides[key] = sameSetting(next, shipped) ? null : (next ?? null);
+    }
+    for (const knob of row.knobs ?? []) {
+      const next = knobDraft.value[knob.key];
+      overrides[knob.key] = next === knob.default ? null : next;
+    }
+    applyStatus(
+      await api<ModelsStatusOut>(`/v1/admin/models/${encodeURIComponent(row.key)}/settings`, {
+        method: "PATCH",
+        json: { overrides },
+      }),
+    );
+    message.success("Settings saved");
+    showSettings.value = false;
+  } catch (e) {
+    message.error(e instanceof ApiError ? e.message : "Could not save settings");
+  } finally {
+    savingKnobs.value = false;
+  }
+}
+
+async function resetKnobs() {
+  const row = settingsRow.value;
+  if (!row) return;
+  savingKnobs.value = true;
+  try {
+    applyStatus(
+      await api<ModelsStatusOut>(`/v1/admin/models/${encodeURIComponent(row.key)}/settings/reset`, {
+        method: "POST",
+      }),
+    );
+    const fresh = status.value?.catalog.find((item) => item.key === row.key);
+    if (fresh) openSettings(fresh);
+    message.success("Settings reset");
+  } catch (e) {
+    message.error(e instanceof ApiError ? e.message : "Could not reset settings");
+  } finally {
+    savingKnobs.value = false;
+  }
+}
+
+const contractFields = computed(() => {
+  const row = settingsRow.value;
+  if (!row?.contract) return [];
+  return Object.entries(row.contract)
+    .filter((entry): entry is [string, string | number | boolean] => {
+      const value = entry[1];
+      return typeof value === "number" || typeof value === "string" || typeof value === "boolean";
+    })
+    .map(([key, shipped]) => ({
+      key,
+      label: settingLabels[key] || key,
+      numeric: typeof shipped === "number",
+      boolean: typeof shipped === "boolean",
+    }));
+});
+
 function confirmDeleteModel(row: ModelCatalogEntry) {
+  const kept = keptCount(row);
+  if (kept > 0) {
+    dialog.warning({
+      title: "Model still in use",
+      content: `${kept} enrollment${kept === 1 ? "" : "s"} still ${kept === 1 ? "matches" : "match"} with ${modelTitle(row)}. Add samples with the new model before deleting this one.`,
+      positiveText: "OK",
+    });
+    return;
+  }
   dialog.warning({
     title: "Delete model",
     content: `Delete ${modelTitle(row)} from the list? The downloaded file is removed too.`,
@@ -451,7 +717,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Model",
     key: "label",
-    minWidth: 160,
+    minWidth: 140,
     sorter: (a, b) => modelTitle(a).localeCompare(modelTitle(b)),
     render(row) {
       return h("div", { class: "name-line" }, [
@@ -459,8 +725,15 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
         row.active
           ? h(NTag, { size: "small", round: true, bordered: false, type: "success" }, { default: () => "In use" })
           : null,
-        row.tier === "optional" && !isCustom(row)
-          ? h(NTag, { size: "small", round: true, bordered: false }, { default: () => "Optional" })
+        !row.active && keptCount(row) > 0
+          ? h(
+              NTag,
+              { size: "small", round: true, bordered: false, type: "warning" },
+              { default: () => `Still matching ${keptCount(row)}` },
+            )
+          : null,
+        fitLabel(row)
+          ? h(NTag, { size: "small", round: true, bordered: false }, { default: () => fitLabel(row) })
           : null,
       ]);
     },
@@ -468,7 +741,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Category",
     key: "category",
-    minWidth: 160,
+    minWidth: 120,
     sorter: (a, b) => categoryLabel(a.category).localeCompare(categoryLabel(b.category)),
     render(row) {
       return categoryLabel(row.category);
@@ -477,7 +750,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Version",
     key: "version",
-    width: 170,
+    width: 148,
     ellipsis: { tooltip: true },
     sorter: (a, b) => (a.version || "").localeCompare(b.version || ""),
     render(row) {
@@ -487,7 +760,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Used for",
     key: "use_for",
-    minWidth: 220,
+    minWidth: 160,
     render(row) {
       const deps = missingDeps(row);
       return h("div", [
@@ -504,17 +777,17 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
     },
   },
   {
-    title: "Recommended for",
-    key: "recommendations",
-    minWidth: 140,
+    title: "Aimed at",
+    key: "hardware",
+    width: 128,
     render(row) {
-      return recommendationText(row);
+      return machineLabel(row.hardware || "");
     },
   },
   {
     title: "Status",
     key: "on_disk",
-    width: 150,
+    width: 136,
     render(row) {
       return h("span", { class: row.on_disk ? "is-ready" : "cell-meta" }, statusText(row));
     },
@@ -522,7 +795,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "",
     key: "actions",
-    width: 300,
+    width: 252,
     render(row) {
       const actions: VNode[] = [];
       if (!row.active) {
@@ -532,7 +805,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
             {
               size: "small",
               loading: usingKey.value === row.key,
-              onClick: () => useModel(row),
+              onClick: () => requestUse(row),
             },
             { default: () => "Use" },
           ),
@@ -549,13 +822,18 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
           { default: () => (row.on_disk ? "Re-download" : "Download") },
         ),
       );
+      if (canEdit(row)) {
+        actions.push(
+          h(NButton, { size: "small", onClick: () => openSettings(row) }, { default: () => "Edit" }),
+        );
+      }
       if (isCustom(row)) {
         actions.push(
           h(
             NDropdown,
             {
               options: [
-                { label: "Edit", key: "edit" },
+                { label: "Details", key: "edit" },
                 { label: "Delete", key: "delete" },
               ],
               onSelect: (key: string) => {
@@ -567,7 +845,7 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
           ),
         );
       }
-      if (row.on_disk) {
+      if (canRemove(row)) {
         actions.push(
           h(
             NPopconfirm,
@@ -602,53 +880,116 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="models-page">
-    <AppPageHeader
+  <div class="or-page models-page">
+    <PageHeader
       title="Models"
-      description="Download what this server uses to recognize voices, faces, and pets."
+      description="Download a model for each kind of recognition. A heavier model in the same category can replace it later."
     >
+      <template #tabs>
+        <SegmentedControl
+          v-model="sectionTab"
+          aria-label="Model sections"
+          :options="sectionTabs"
+        />
+      </template>
       <template #action>
         <NButton @click="openAddModel">Add a model</NButton>
         <NDropdown :options="[{ label: 'Reload models', key: 'reload' }]" @select="reloadRuntime">
           <NButton :loading="reloading">More</NButton>
         </NDropdown>
-        <NButton
-          v-if="missingCount > 0"
-          type="primary"
-          :loading="downloading && !downloadingKey"
-          @click="download()"
-        >
-          <template #icon>
-            <NIcon><CloudDownloadOutline /></NIcon>
-          </template>
-          Download missing ({{ missingCount }})
-        </NButton>
       </template>
-    </AppPageHeader>
+    </PageHeader>
 
     <NSkeleton v-if="loading && !status" text :repeat="6" />
 
     <template v-else-if="status">
-      <NAlert v-if="showGuessWarning" type="warning" :bordered="false">
+      <NAlert v-if="showGuessWarning && sectionTab !== 'settings'" type="warning" :bordered="false">
         <div class="guess-row">
           <span>Downloaded files are on this server, but matching is using the built-in guess.</span>
-          <NButton text @click="openAdvanced">Change</NButton>
+          <NButton text @click="openSettingsTab">Change</NButton>
         </div>
       </NAlert>
 
+      <section v-if="sectionTab === 'recommended'" class="models-section">
+        <div class="hardware-banner">
+          <div>
+            <strong>{{ status.hardware.label }}</strong>
+            <p class="cell-meta">
+              {{ status.hardware.cpu_count }} cores · {{ memoryText(status.hardware.memory_mb) }}
+              <template v-if="status.hardware.override"> · override</template>
+            </p>
+          </div>
+          <div class="hardware-actions">
+            <NSelect
+              class="hardware-select"
+              :value="hardwareDraft"
+              :options="hardwareOptions"
+              :loading="savingHardware"
+              @update:value="saveHardware"
+            />
+            <NButton
+              v-if="suggestedMissing.length > 0"
+              type="primary"
+              :loading="downloading && !downloadingKey"
+              @click="downloadSuggested"
+            >
+              <template #icon>
+                <NIcon><CloudDownloadOutline /></NIcon>
+              </template>
+              Download suggested ({{ suggestedMissing.length }})
+            </NButton>
+          </div>
+        </div>
+        <p class="hint">
+          One model for each kind of recognition, picked for this machine. A heavier model stays available under All models.
+        </p>
+        <div class="recommend-grid">
+          <article
+            v-for="row in recommendedRows"
+            :key="row.key"
+            class="recommend-card"
+            :class="{ 'is-active': row.active, 'is-kept': !row.active && keptCount(row) > 0 }"
+          >
+            <p class="recommend-kicker">{{ categoryLabel(row.category) }}</p>
+            <div class="name-line">
+              <strong>{{ modelTitle(row) }}</strong>
+              <NTag size="small" round :bordered="false">Suggested</NTag>
+            </div>
+            <p class="usage-state" :class="usageClass(row)">{{ usageText(row) }}</p>
+            <p class="hint">{{ row.use_for }}</p>
+            <p class="meta-label">Version</p>
+            <p class="cell-meta">{{ row.version || "—" }}</p>
+            <template v-if="row.enables.length">
+              <p class="meta-label">Enables</p>
+              <ul class="enable-list">
+                <li v-for="item in row.enables" :key="item">{{ item }}</li>
+              </ul>
+            </template>
+            <p v-if="row.on_disk && formatBytes(row.size_bytes)" class="cell-meta">{{ formatBytes(row.size_bytes) }}</p>
+            <div class="row-actions">
+              <NButton v-if="!row.active" size="small" :loading="usingKey === row.key" @click="requestUse(row)">
+                Use
+              </NButton>
+              <NButton
+                size="small"
+                :loading="downloadingKey === row.key"
+                @click="downloadOne(row.key, row.on_disk)"
+              >
+                {{ row.on_disk ? "Re-download" : "Download" }}
+              </NButton>
+              <NButton v-if="canEdit(row)" size="small" @click="openSettings(row)">Edit</NButton>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="sectionTab === 'catalog'" class="models-section">
       <div class="toolbar">
         <NInput
           v-model:value="search"
           class="search-control"
           clearable
           placeholder="Search models"
-        />
-        <NSelect
-          v-model:value="recommendationFilter"
-          class="filter-control"
-          :options="recommendationOptions"
-          clearable
-          placeholder="Recommended set"
         />
         <NSelect
           v-model:value="groupFilter"
@@ -665,10 +1006,6 @@ onMounted(() => {
           placeholder="Status"
         />
       </div>
-      <p v-if="selectedRecommendation?.description" class="hint">
-        {{ selectedRecommendation.description }}
-      </p>
-
       <p v-if="filteredRows.length === 0" class="filter-empty">
         Nothing matches.
         <NButton v-if="filtersActive" text type="primary" size="small" @click="clearFilters">
@@ -677,25 +1014,30 @@ onMounted(() => {
       </p>
 
       <template v-else>
-        <div class="or-list-cards">
-          <article v-for="row in filteredRows" :key="row.key" class="or-list-card model-card">
+        <div class="or-list-cards model-card-scroll" @scroll="onTableScroll">
+          <article v-for="row in tableRows" :key="row.key" class="or-list-card model-card">
             <div class="model-card-copy">
               <span class="or-list-card__title">
                 {{ modelTitle(row) }}
                 <NTag v-if="row.active" size="small" round :bordered="false" type="success">In use</NTag>
+                <NTag v-else-if="keptCount(row) > 0" size="small" round :bordered="false" type="warning">
+                  Still matching {{ keptCount(row) }}
+                </NTag>
+                <NTag v-if="fitLabel(row)" size="small" round :bordered="false">{{ fitLabel(row) }}</NTag>
               </span>
               <span class="or-list-card__meta">
                 <span>{{ categoryLabel(row.category) }}</span>
+                <span>{{ machineLabel(row.hardware || "") }}</span>
                 <span>{{ row.version || "—" }}</span>
-                <span>{{ recommendationText(row) }}</span>
                 <span :class="{ 'is-ready': row.on_disk }">{{ statusText(row) }}</span>
               </span>
               <p>{{ row.use_for }}</p>
             </div>
             <div class="row-actions">
-              <NButton v-if="!row.active" size="small" :loading="usingKey === row.key" @click="useModel(row)">
+              <NButton v-if="!row.active" size="small" :loading="usingKey === row.key" @click="requestUse(row)">
                 Use
               </NButton>
+              <NButton v-if="canEdit(row)" size="small" @click="openSettings(row)">Edit</NButton>
               <NButton
                 size="small"
                 :loading="downloadingKey === row.key"
@@ -703,11 +1045,11 @@ onMounted(() => {
               >
                 {{ row.on_disk ? "Re-download" : "Download" }}
               </NButton>
-              <NButton v-if="isCustom(row)" size="small" quaternary @click="openEditModel(row)">Edit</NButton>
+              <NButton v-if="isCustom(row)" size="small" quaternary @click="openEditModel(row)">Details</NButton>
               <NButton v-if="isCustom(row)" size="small" quaternary @click="confirmDeleteModel(row)">
                 Delete
               </NButton>
-              <NPopconfirm v-if="row.on_disk" @positive-click="deleteOne(row.key)">
+              <NPopconfirm v-if="canRemove(row)" @positive-click="deleteOne(row.key)">
                 <template #trigger>
                   <NButton size="small" quaternary :loading="deletingKey === row.key">Remove</NButton>
                 </template>
@@ -716,74 +1058,80 @@ onMounted(() => {
             </div>
           </article>
         </div>
-        <div class="or-table-wrap or-table-desktop">
+        <div
+          class="or-table-wrap or-table-desktop models-table"
+          :style="{ height: `${tableHeight}px` }"
+          @scroll.capture="onTableScroll"
+        >
           <NDataTable
             :columns="columns"
-            :data="filteredRows"
+            :data="tableRows"
             :bordered="false"
+            flex-height
+            virtual-scroll
+            :header-height="44"
+            :min-row-height="64"
             size="medium"
             :row-key="(row: ModelCatalogEntry) => row.key"
           />
         </div>
         <p class="table-total">
-          {{ filteredRows.length }}
-          <template v-if="filteredRows.length !== status.catalog.length">
-            of {{ status.catalog.length }}
-          </template>
-          model{{ filteredRows.length === 1 ? "" : "s" }}
+          {{ modelCountLabel }}
+          <template v-if="hasMoreModels"> · scroll for more</template>
         </p>
       </template>
+      </section>
 
-      <NCollapse v-model:expanded-names="advancedOpen">
-        <NCollapseItem title="Advanced" name="advanced">
-          <h3 class="subhead">How matching runs</h3>
-          <p class="hint">
-            Automatic uses a downloaded file when you have one, and a simple built-in guess when you do not.
-            ONNX is the file format of those downloads. You do not install it separately.
-          </p>
-          <div class="inference-controls">
-            <NSelect v-model:value="inferenceDraft" :options="inferenceOptions" />
-            <NButton :loading="savingInference" :disabled="!inferenceDirty" @click="saveInference">
-              Save
-            </NButton>
-          </div>
-          <p v-if="effectiveRuntime" class="hint runtime-line">
-            Right now: {{ effectiveRuntime.summary }}.
-            <template v-if="status.inference_backend === 'auto'">
-              {{ effectiveRuntime.onnxCount }} of
-              {{ effectiveRuntime.onnxCount + effectiveRuntime.heuristicCount }}
-              jobs use a downloaded file.
-            </template>
-          </p>
-          <NAlert
-            v-if="effectiveRuntime?.warnings?.length"
-            type="warning"
-            :bordered="false"
-            class="warn-alert"
+      <section v-if="sectionTab === 'settings'" class="models-section">
+        <h3 class="subhead">How matching runs</h3>
+        <p class="hint">
+          Automatic uses a downloaded file when you have one, and a simple built-in guess when you do not.
+        </p>
+        <div class="inference-controls">
+          <NSelect v-model:value="inferenceDraft" :options="inferenceOptions" />
+          <NButton :loading="savingInference" :disabled="!inferenceDirty" @click="saveInference">
+            Save
+          </NButton>
+        </div>
+        <p v-if="effectiveRuntime" class="hint runtime-line">
+          Right now: {{ effectiveRuntime.summary }}.
+          <template v-if="status.inference_backend === 'auto'">
+            {{ effectiveRuntime.onnxCount }} of
+            {{ effectiveRuntime.onnxCount + effectiveRuntime.heuristicCount }}
+            jobs use a downloaded file.
+          </template>
+        </p>
+        <NAlert
+          v-if="effectiveRuntime?.warnings?.length"
+          type="warning"
+          :bordered="false"
+          class="warn-alert"
+        >
+          <ul class="warn-list">
+            <li v-for="(w, i) in effectiveRuntime.warnings" :key="i">{{ w }}</li>
+          </ul>
+        </NAlert>
+
+        <h3 class="subhead">How hard the files work</h3>
+        <p class="hint">
+          Automatic uses up to four CPU cores. Set a number from 1 to 8 when this machine should work harder or leave more room for other programs.
+        </p>
+        <div class="inference-controls">
+          <NInputNumber v-model:value="threadDraft" :min="1" :max="8" :step="1" />
+          <NButton :loading="savingThreads" :disabled="!threadDirty" @click="saveThreads()">Save</NButton>
+          <NButton
+            v-if="status.threads.overridden"
+            :loading="savingThreads"
+            @click="saveThreads(true)"
           >
-            <ul class="warn-list">
-              <li v-for="(w, i) in effectiveRuntime.warnings" :key="i">{{ w }}</li>
-            </ul>
-          </NAlert>
+            Automatic ({{ status.threads.automatic }})
+          </NButton>
+        </div>
 
-          <h3 class="subhead">Where these files are stored</h3>
-          <p class="hint">
-            Downloads are stored in this folder. How each file runs is saved with that model. Recommended sets are saved in the database, so a new set can be added without changing this page.
-          </p>
-          <p class="cell-meta">{{ status.pack_dir }}</p>
-          <div v-if="Object.keys(status.loaded_models).length" class="tag-row">
-            <NTag
-              v-for="key in Object.keys(status.loaded_models)"
-              :key="key"
-              size="small"
-              round
-              :bordered="false"
-            >
-              {{ catalogByKey.get(key)?.label || key }}
-            </NTag>
-          </div>
-        </NCollapseItem>
-      </NCollapse>
+        <h3 class="subhead">Where these files are stored</h3>
+        <p class="hint">New downloads go in this folder. Edit a model to change how its file runs.</p>
+        <p class="cell-meta">{{ status.models_dir }}</p>
+      </section>
 
       <NModal
         v-model:show="showModelForm"
@@ -840,19 +1188,160 @@ onMounted(() => {
           </div>
         </template>
       </NModal>
+
+      <NModal v-model:show="showSettings" preset="card" title="ONNX settings" class="or-modal">
+        <template v-if="settingsRow">
+          <p class="hint">{{ modelTitle(settingsRow) }}. These values are applied the next time this model runs.</p>
+          <NForm label-placement="top">
+            <NFormItem v-for="field in contractFields" :key="field.key" :label="field.label">
+              <NInputNumber
+                v-if="field.numeric"
+                :value="Number(contractDraft[field.key])"
+                class="setting-input"
+                @update:value="(value) => (contractDraft[field.key] = value ?? 0)"
+              />
+              <NInput v-else v-model:value="contractDraft[field.key] as string" />
+            </NFormItem>
+            <NFormItem v-for="knob in settingsRow.knobs ?? []" :key="knob.key" :label="knob.label">
+              <NInputNumber
+                v-model:value="knobDraft[knob.key]"
+                class="setting-input"
+                :min="knob.min"
+                :max="knob.max"
+                :step="knob.step"
+              />
+            </NFormItem>
+          </NForm>
+        </template>
+        <template #footer>
+          <div class="or-modal-footer">
+            <NButton :loading="savingKnobs" @click="resetKnobs">Reset</NButton>
+            <NButton @click="showSettings = false">Cancel</NButton>
+            <NButton type="primary" :loading="savingKnobs" @click="saveKnobs">Save</NButton>
+          </div>
+        </template>
+      </NModal>
     </template>
   </div>
 </template>
 
 <style scoped>
-.models-page {
+.hardware-banner {
   display: flex;
-  flex-direction: column;
-  gap: var(--or-section-gap);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
 }
 
-.models-page :deep(.app-page-header) {
-  margin-bottom: 0;
+.hardware-banner strong {
+  font-size: 1rem;
+}
+
+.hardware-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hardware-select {
+  width: 240px;
+  max-width: 100%;
+}
+
+.models-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recommend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.recommend-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  height: 100%;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--or-line, var(--n-border-color));
+  border-radius: var(--or-radius-md, 10px);
+  background: var(--or-surface, transparent);
+}
+
+.recommend-card.is-active {
+  border-color: color-mix(in oklab, var(--or-success) 55%, var(--or-line));
+}
+
+.recommend-card.is-kept {
+  border-color: color-mix(in oklab, var(--or-warning) 55%, var(--or-line));
+}
+
+.recommend-card .row-actions {
+  margin-top: auto;
+}
+
+.usage-state {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.usage-state.is-active-copy {
+  color: var(--or-success);
+}
+
+.usage-state.is-kept-copy {
+  color: var(--or-warning);
+}
+
+.meta-label {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--n-text-color-3);
+}
+
+.enable-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--n-text-color-2);
+  font-size: 0.875rem;
+}
+
+.enable-list li + li {
+  margin-top: 2px;
+}
+
+.recommend-kicker {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--n-text-color-3);
+}
+
+.models-table :deep(.n-data-table) {
+  height: 100%;
+}
+
+.model-card-scroll {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.contract-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 0;
+  font-size: 0.875rem;
 }
 
 .toolbar {
@@ -997,6 +1486,7 @@ onMounted(() => {
 @media (max-width: 720px) {
   .search-control,
   .filter-control,
+  .hardware-select,
   .inference-controls {
     width: 100%;
   }

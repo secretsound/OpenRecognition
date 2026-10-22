@@ -26,8 +26,10 @@ const router = useRouter();
 
 const title = computed(() => {
   if (!props.log) return "Event details";
-  const label = props.log.label;
-  return label ? `${formatEvent(props.log.event)} — ${label}` : formatEvent(props.log.event);
+  const event = formatEvent(props.log.event);
+  const label = props.log.label?.trim();
+  if (!label || label.toLowerCase() === "unknown") return event;
+  return `${event} — ${label}`;
 });
 
 const gateScores = computed(() => props.log?.details?.gate_scores ?? null);

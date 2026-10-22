@@ -37,7 +37,7 @@ def _return_unknown(state: AppState, value: bool | None) -> bool:
 def _include_sound_events(state: AppState, value: bool | None) -> bool:
     if value is not None:
         return value
-    return state.default_include_sound_events or state.settings.pack == "home"
+    return state.default_include_sound_events
 
 
 def _meta(state: AppState, **kwargs) -> MetaInfo:
@@ -56,9 +56,12 @@ async def _dispatch(
     response: RecognizeResponse,
     dry_run: bool,
     auth: dict | None = None,
+    extras: dict | None = None,
 ) -> None:
     """Webhooks, MQTT, presence — skipped when dry_run."""
     payload = response.model_dump()
+    if extras:
+        payload.update({k: v for k, v in extras.items() if v is not None})
     if not dry_run:
         await state.webhooks.dispatch_recognition(event, payload, dry_run=False)
         for ent in response.entities:
@@ -161,7 +164,7 @@ async def recognize_audio(
             scores=gate.scores,
             meta=_meta(
                 state,
-                pack=state.settings.pack,
+                hardware=state.hardware_info()["effective"],
                 latency_ms=lat,
                 request_id=request_id,
                 camera_id=camera_id,
@@ -181,10 +184,7 @@ async def recognize_audio(
         return resp
     if gate.gate == "accept" and mode in ("identify", "full"):
         speaker_block = state.inference_policy.identity_blocked("speaker_embedding")
-        gallery = state.gallery.get_embeddings_for_match(
-            modality="audio",
-            model_version=state.speaker.current_model_version(),
-        )
+        gallery = state.gallery.get_embeddings_for_match(modality="audio")
         if speaker_block:
             if include_candidates:
                 diagnostics = RecognizeDiagnostics(
@@ -193,11 +193,17 @@ async def recognize_audio(
                     notes=[speaker_block],
                 )
         elif state.feature_flags.get("biometrics.speaker_enabled", True):
-            vec = state.speaker.embed(data)
-            ranked = state.speaker.match_candidates(vec, gallery, min_confidence)
-            for m in state.speaker.match_gallery(
-                vec, gallery, min_confidence, return_unknown
-            ):
+            from openrecognition.inference.alternates import speaker_alternates
+
+            outcome = state.speaker.match_retained(
+                data,
+                gallery,
+                min_confidence,
+                return_unknown,
+                alternates=speaker_alternates(state, gallery),
+            )
+            ranked = outcome["candidates"]
+            for m in outcome["matches"]:
                 entities.append(EntityResult(**m))
             if (
                 not dry_run
@@ -205,13 +211,15 @@ async def recognize_audio(
                 and entities[0].entity_id
                 and entities[0].label != "unknown"
                 and entities[0].modality == "audio"
+                and outcome["model_version"] == state.speaker.current_model_version()
+                and outcome["vector"] is not None
             ):
                 from openrecognition.gallery.learn import maybe_learn_voice
 
                 maybe_learn_voice(
                     state.gallery,
                     entities[0].entity_id,
-                    vec,
+                    outcome["vector"],
                     state.speaker.current_model_version(),
                     confidence=float(entities[0].confidence or 0.0),
                     candidates=ranked,
@@ -244,7 +252,7 @@ async def recognize_audio(
         diagnostics=diagnostics,
         meta=_meta(
             state,
-            pack=state.settings.pack,
+            hardware=state.hardware_info()["effective"],
             latency_ms=lat,
             request_id=request_id,
             camera_id=camera_id,
@@ -262,10 +270,13 @@ async def recognize_audio(
             modality="audio",
             summary=gate.reason or "Audio gate rejected",
         )
+        await _dispatch(
+            state, "recognition.gate_reject", resp, dry_run, auth, extras={"mode": mode}
+        )
     elif entities:
         event = "recognition.unknown" if entities[0].label == "unknown" else "recognition.match"
         _log_recognition(state, event, resp, dry_run=dry_run, auth=auth)
-        await _dispatch(state, event, resp, dry_run, auth)
+        await _dispatch(state, event, resp, dry_run, auth, extras={"mode": mode})
     else:
         _log_recognition(
             state,
@@ -275,6 +286,9 @@ async def recognize_audio(
             auth=auth,
             modality="audio",
             summary="No speaker matched the gallery",
+        )
+        await _dispatch(
+            state, "recognition.no_match", resp, dry_run, auth, extras={"mode": mode}
         )
     return resp
 
@@ -293,10 +307,9 @@ async def _recognize_image_bytes(
     include_candidates: bool = False,
 ) -> RecognizeResponse:
     start = time.perf_counter()
-    gallery = state.gallery.image_embeddings_for_match(
-        state.vision.current_face_model_version(),
-        state.vision.current_visual_model_version(),
-    )
+    from openrecognition.inference.alternates import face_alternates, visual_alternates
+
+    gallery = state.gallery.get_embeddings_for_match(modality="image")
     face_block = state.inference_policy.identity_blocked("face_embedding")
     visual_block = state.inference_policy.identity_blocked("visual_reid")
     raw, diag_raw = state.vision.recognize_image(
@@ -308,6 +321,8 @@ async def _recognize_image_bytes(
         min_confidence=min_confidence,
         return_unknown=return_unknown,
         include_candidates=include_candidates,
+        face_alternates=face_alternates(state, gallery),
+        visual_alternates=visual_alternates(state, gallery),
     )
     entities = [EntityResult(**e) for e in raw]
     diagnostics = None
@@ -329,7 +344,7 @@ async def _recognize_image_bytes(
         diagnostics=diagnostics,
         meta=_meta(
             state,
-            pack=state.settings.pack,
+            hardware=state.hardware_info()["effective"],
             latency_ms=lat,
             request_id=request_id,
             camera_id=camera_id,
@@ -340,7 +355,7 @@ async def _recognize_image_bytes(
     if entities:
         event = "recognition.unknown" if entities[0].label == "unknown" else "recognition.match"
         _log_recognition(state, event, resp, dry_run=dry_run, auth=auth)
-        await _dispatch(state, event, resp, dry_run, auth)
+        await _dispatch(state, event, resp, dry_run, auth, extras={"mode": "image"})
     else:
         _log_recognition(
             state,
@@ -350,6 +365,9 @@ async def _recognize_image_bytes(
             auth=auth,
             modality="image",
             summary="No face/pet/object matched the gallery",
+        )
+        await _dispatch(
+            state, "recognition.no_match", resp, dry_run, auth, extras={"mode": "image"}
         )
     return resp
 
@@ -470,7 +488,7 @@ async def recognize_video(
         diagnostics=diagnostics,
         meta=_meta(
             state,
-            pack=state.settings.pack,
+            hardware=state.hardware_info()["effective"],
             latency_ms=lat,
             request_id=request_id,
             dry_run=dry_run,
@@ -479,7 +497,7 @@ async def recognize_video(
     if entities:
         event = "recognition.unknown" if entities[0].label == "unknown" else "recognition.match"
         _log_recognition(state, event, resp, dry_run=dry_run, auth=auth)
-        await _dispatch(state, event, resp, dry_run, auth)
+        await _dispatch(state, event, resp, dry_run, auth, extras={"mode": "video"})
     else:
         _log_recognition(
             state,
@@ -489,5 +507,8 @@ async def recognize_video(
             auth=auth,
             modality="video",
             summary="No match in video segment",
+        )
+        await _dispatch(
+            state, "recognition.no_match", resp, dry_run, auth, extras={"mode": "video"}
         )
     return resp

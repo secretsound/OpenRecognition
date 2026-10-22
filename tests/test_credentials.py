@@ -49,7 +49,11 @@ def test_login_rate_limit_and_logout(client, auth_headers):
         )
         assert ok.status_code == 200
         sid = ok.json()["session_id"]
-        assert client.get("/v1/auth/me").status_code == 200
+        me = client.get("/v1/auth/me")
+        assert me.status_code == 200
+        assert me.json()["credential_type"] == "session"
+        assert me.json()["role"] == "operator"
+        assert me.json()["name"] == "rate-op"
 
         assert client.post("/v1/auth/logout").status_code == 200
         assert client.get("/v1/auth/me").status_code == 401

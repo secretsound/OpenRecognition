@@ -34,7 +34,7 @@ def api_docs_portal():
     <h2><a href="/redoc">ReDoc</a></h2>
     <p>Readable reference documentation generated from the same OpenAPI schema.</p>
   </div>
-  <p><a href="/openapi.json">openapi.json</a> · <a href="/health">health</a> · <a href="/ui/">Web UI</a></p>
+  <p><a href="/openapi.json">openapi.json</a> · <a href="/health">health</a> · <a href="/">Console</a></p>
 </body>
 </html>
 """

@@ -72,7 +72,7 @@ const MIN_GAP_SEC = 0.5;
 const maxDurationSec = computed(() =>
   props.mode === "enrollment"
     ? props.limits.enrollment_max_sec
-    : props.limits.recognize_sync_max_sec,
+    : props.limits.recognize_async_max_sec,
 );
 
 const recommended = computed(() => props.limits.recommended_sec);

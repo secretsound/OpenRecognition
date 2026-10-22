@@ -1,20 +1,20 @@
 # OpenRecognition Web UI
 
-Vue 3 + Naive UI admin console for enrollments, API keys, and webhooks. UI conventions: [../../docs/ui-design.md](../../docs/ui-design.md).
+Vue 3 + Naive UI console for the library, recognition, API keys, and connections.
 
 ## Prerequisites
 
-- Node.js 20+ and npm
+- Deno 2+
 - OpenRecognition API running on port 8080
 
 ## Development
 
 ```bash
 cd src/web
-npm install --legacy-peer-deps
+deno task install
 export OPENRECOGNITION_WEB_ORIGIN=https://localhost:5173   # API env (HTTPS for mic)
 openrecognition serve   # separate terminal
-npm run dev
+deno task dev
 ```
 
 Open **[https://localhost:5173](https://localhost:5173)** (Vite uses a self-signed certificate — accept the browser warning once). Vite proxies `/v1` and `/health` to the API.
@@ -26,7 +26,7 @@ On a new data directory the console asks you to create the admin account. That p
 ## Production build
 
 ```bash
-npm run build
+deno task build
 ```
 
 Output is written to [`dist/`](dist/). FastAPI serves it at `/` when the API is running.

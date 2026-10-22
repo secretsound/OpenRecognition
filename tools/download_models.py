@@ -5,30 +5,30 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
+from openrecognition.config import settings
 from openrecognition.models_download import (
     MODEL_CATALOG,
     download_models,
     list_catalog,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
-PACKS = ROOT / "model-packs"
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Download ONNX weights into model-packs/<pack>/",
+        description="Download ONNX weights into the models directory",
         epilog="Same as: openrecognition models download",
     )
-    parser.add_argument("--pack", default="edge", choices=["edge", "standard", "home"])
+    parser.add_argument(
+        "--dir",
+        default=str(settings.models_dir),
+        help="Where to save the files (default: OPENRECOGNITION_MODELS_DIR or ./models)",
+    )
     parser.add_argument(
         "--only",
         action="append",
         default=[],
-        help="Model keys (default: all for this pack)",
+        help="Model keys (default: the whole catalog)",
     )
     parser.add_argument(
         "--list",
@@ -44,11 +44,11 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.list:
-        rows = list_catalog(pack=args.pack)
+        rows = list_catalog()
         if args.json:
             print(json.dumps(rows, indent=2))
         else:
-            print(f"Models for pack '{args.pack}' (not stored in git):\n")
+            print("Models (not stored in git):\n")
             for row in rows:
                 print(f"  {row['key']}")
                 print(f"    file:   {row['filename']}")
@@ -57,9 +57,8 @@ def main() -> None:
                 print()
         return
 
-    pack_dir = PACKS / args.pack
-    if not pack_dir.is_dir():
-        raise SystemExit(f"Unknown pack directory: {pack_dir}")
+    model_dir = Path(args.dir)
+    model_dir.mkdir(parents=True, exist_ok=True)
 
     if args.only:
         unknown = set(args.only) - {m.key for m in MODEL_CATALOG}
@@ -68,7 +67,7 @@ def main() -> None:
 
     keys = args.only or None
     try:
-        results = download_models(pack_dir, keys=keys, force=args.force)
+        results = download_models(model_dir, keys=keys, force=args.force)
     except ValueError as e:
         raise SystemExit(str(e)) from e
 
@@ -78,8 +77,7 @@ def main() -> None:
         for r in results:
             print(f"{r['key']}: {r['status']} — {r['message']}")
             if r["status"] == "downloaded":
-                print(f"  {r['path']}")
-        print("\nDone. Check GET /health or: openrecognition models status")
+                print(f"         {r.get('url', '')}")
 
 
 if __name__ == "__main__":

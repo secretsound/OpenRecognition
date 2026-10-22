@@ -58,7 +58,7 @@ class EntityResult(BaseModel):
 
 
 class MetaInfo(BaseModel):
-    pack: str
+    hardware: str = ""
     latency_ms: float
     request_id: str | None = None
     camera_id: str | None = None
@@ -123,6 +123,7 @@ class EnrollmentOut(BaseModel):
     learn_margin: float = 0.05
     learn_daily_cap: int = 8
     learn_max_samples: int = 20
+    wyoming_min_confidence: float | None = None
     external_ids: dict[str, str] = Field(default_factory=dict)
     sample_count: int = 0
     model_version: str | None = None
@@ -130,6 +131,7 @@ class EnrollmentOut(BaseModel):
     updated_at: str
     quality: QualityInfo | None = None
     duplicate_warning: str | None = None
+    last_seen_at: str | None = None
 
 
 class EnrollmentPatch(BaseModel):
@@ -142,6 +144,7 @@ class EnrollmentPatch(BaseModel):
     learn_margin: float | None = Field(default=None, ge=0.0, le=0.5)
     learn_daily_cap: int | None = Field(default=None, ge=1, le=100)
     learn_max_samples: int | None = Field(default=None, ge=1, le=200)
+    wyoming_min_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class SampleOut(BaseModel):
@@ -161,6 +164,20 @@ class SampleOut(BaseModel):
     centroid_similarity: float | None = None
     media_stored: bool = False
     flags: list[str] = Field(default_factory=list)
+
+
+class SamplePreviewOut(BaseModel):
+    """Quality of one take without saving it."""
+
+    score: float
+    verdict: str
+    duration_ms: float | None = None
+    gate: str | None = None
+    reason: str | None = None
+    speech: float | None = None
+    centroid_similarity: float | None = None
+    issues: list[str] = Field(default_factory=list)
+    advice: str
 
 
 class McpToolOut(BaseModel):
@@ -209,7 +226,7 @@ class VideoLimits(BaseModel):
 
 
 class CapabilitiesOut(BaseModel):
-    pack: str
+    hardware: "HardwareOut"
     version: str
     recognition_types: list[str]
     modalities: list[str]
@@ -219,19 +236,45 @@ class CapabilitiesOut(BaseModel):
     video_limits: VideoLimits | None = None
 
 
+WEBHOOK_DEFAULT_TITLE = "{{label}} was recognized"
+WEBHOOK_DEFAULT_MESSAGE = "{{label}} matched at {{confidence}} on {{modality}}"
+
+
 class WebhookSubscriptionCreate(BaseModel):
     url: str
-    events: list[str] = Field(default_factory=lambda: ["recognition.match"])
+    name: str = Field("", max_length=80)
+    title_template: str = Field(WEBHOOK_DEFAULT_TITLE, max_length=500)
+    message_template: str = Field(WEBHOOK_DEFAULT_MESSAGE, max_length=2000)
+    events: list[str] = Field(
+        default_factory=lambda: ["recognition.match", "recognition.unknown"],
+        min_length=1,
+    )
     filters: dict[str, Any] = Field(default_factory=dict)
-    debounce_seconds: int = 30
+    debounce_seconds: int = Field(30, ge=0, le=3600)
+    include_details: bool = True
+
+
+class WebhookSubscriptionPatch(BaseModel):
+    url: str | None = None
+    name: str | None = Field(None, max_length=80)
+    title_template: str | None = Field(None, max_length=500)
+    message_template: str | None = Field(None, max_length=2000)
+    events: list[str] | None = Field(None, min_length=1)
+    filters: dict[str, Any] | None = None
+    debounce_seconds: int | None = Field(None, ge=0, le=3600)
+    include_details: bool | None = None
 
 
 class WebhookSubscriptionOut(BaseModel):
     id: str
     url: str
+    name: str = ""
+    title_template: str = ""
+    message_template: str = ""
     events: list[str]
     filters: dict[str, Any]
     debounce_seconds: int
+    include_details: bool = True
     created_at: str
 
 
@@ -240,6 +283,15 @@ class MqttIntegrationOut(BaseModel):
     host: str
     port: int
     topic_prefix: str
+    username: str = ""
+    password_set: bool = False
+    client_id: str = "openrecognition"
+    use_tls: bool = False
+    tls_insecure: bool = False
+    qos: int = 0
+    retain: bool = True
+    connected: bool = False
+    last_error: str | None = None
 
 
 class MqttIntegrationPatch(BaseModel):
@@ -247,6 +299,23 @@ class MqttIntegrationPatch(BaseModel):
     host: str | None = Field(None, min_length=1, max_length=253)
     port: int | None = Field(None, ge=1, le=65535)
     topic_prefix: str | None = Field(None, min_length=1, max_length=128)
+    username: str | None = Field(None, max_length=128)
+    password: str | None = Field(None, max_length=256)
+    client_id: str | None = Field(None, min_length=1, max_length=128)
+    use_tls: bool | None = None
+    tls_insecure: bool | None = None
+    qos: int | None = Field(None, ge=0, le=2)
+    retain: bool | None = None
+
+
+class MqttIntegrationTestIn(BaseModel):
+    host: str = Field(..., min_length=1, max_length=253)
+    port: int = Field(1883, ge=1, le=65535)
+    username: str = ""
+    password: str | None = None
+    client_id: str = Field("openrecognition", min_length=1, max_length=128)
+    use_tls: bool = False
+    tls_insecure: bool = False
 
 
 class DiscoveredWyomingOut(BaseModel):
@@ -301,6 +370,8 @@ class WyomingIntegrationOut(BaseModel):
     require_speaker_match: bool
     block_on_gate_reject: bool
     tag_speaker: bool
+    include_confidence: bool = True
+    include_candidates: bool = False
     zeroconf_enabled: bool = True
     zeroconf_name: str = "openrecognition"
     advertise_host: str | None = None
@@ -321,6 +392,8 @@ class WyomingIntegrationPatch(BaseModel):
     require_speaker_match: bool | None = None
     block_on_gate_reject: bool | None = None
     tag_speaker: bool | None = None
+    include_confidence: bool | None = None
+    include_candidates: bool | None = None
     zeroconf_enabled: bool | None = None
     zeroconf_name: str | None = Field(None, min_length=1, max_length=63)
     advertise_host: str | None = Field(None, max_length=128)
@@ -356,6 +429,7 @@ class AuthMeOut(BaseModel):
     credential_type: str
     name: str
     scopes: list[str]
+    role: str | None = None
     mcp_tools: list[McpToolOut]
     mcp_resources: list[McpResourceOut]
 
@@ -443,12 +517,12 @@ class AppSettingsOut(BaseModel):
     default_return_unknown: bool
     default_include_sound_events: bool
     recognition_log_retention_days: int
-    pack: str
+    hardware: "HardwareOut"
     auth_required: bool
     docs_enabled: bool
     web_enabled: bool
     data_dir: str
-    model_packs_dir: str
+    models_dir: str
     session_ttl_minutes: int
     mqtt_enabled: bool
     mqtt_host: str
@@ -479,6 +553,7 @@ class AppSettingsPatch(BaseModel):
     recognition_log_retention_days: int | None = Field(None, ge=0, le=3650)
     session_ttl_minutes: int | None = Field(None, ge=5, le=10080)
     model_idle_unload_minutes: int | None = Field(None, ge=0, le=1440)
+    onnx_intra_op_threads: int | None = Field(None, ge=1, le=8)
 
 
 class ModelCategoryOut(BaseModel):
@@ -499,6 +574,34 @@ class ModelPresetOut(BaseModel):
     missing_keys: list[str] = Field(default_factory=list)
 
 
+class KnobFieldOut(BaseModel):
+    key: str
+    label: str
+    kind: Literal["int", "float"]
+    min: float
+    max: float
+    step: float
+    default: float | int
+    value: float | int
+    overridden: bool = False
+
+
+class HardwareOut(BaseModel):
+    detected: str
+    override: str | None = None
+    effective: str
+    label: str
+    cpu_count: int
+    memory_mb: int
+    arch: str = ""
+
+
+class ThreadsOut(BaseModel):
+    value: int
+    automatic: int
+    overridden: bool = False
+
+
 class ModelCatalogEntryOut(BaseModel):
     key: str
     filename: str
@@ -506,7 +609,7 @@ class ModelCatalogEntryOut(BaseModel):
     url: str
     description: str
     license: str
-    packs: list[str]
+    license_warning: bool = False
     on_disk: bool
     size_bytes: int | None = None
     category: str
@@ -514,34 +617,41 @@ class ModelCatalogEntryOut(BaseModel):
     label: str = ""
     version: str = ""
     onnx: dict[str, Any] = Field(default_factory=dict)
+    contract: dict[str, Any] = Field(default_factory=dict)
+    knobs: list[KnobFieldOut] = Field(default_factory=list)
     hardware: str = "pi"
     hardware_note: str = ""
+    fit: str = "match"
+    suggested: bool = False
     tier: str
     enables: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     sort_order: int = 0
     origin: str = "builtin"
     active: bool = False
-
-
-class ModelRecommendationOut(BaseModel):
-    id: str
-    label: str
-    description: str = ""
-    sort_order: int = 0
-    keys: list[str] = Field(default_factory=list)
+    reenroll_count: int = 0
+    enrollment_count: int = 0
+    sha256_pinned: bool = False
 
 
 class ModelsStatusOut(BaseModel):
-    pack: str
-    pack_dir: str
+    models_dir: str
+    hardware: HardwareOut
+    threads: ThreadsOut
     categories: list[ModelCategoryOut]
     presets: list[ModelPresetOut]
-    recommendations: list[ModelRecommendationOut] = Field(default_factory=list)
     catalog: list[ModelCatalogEntryOut]
     inference_backend: str
     loaded_models: dict[str, str]
     inference: dict[str, Any] | None = None
+
+
+class HardwareUpdate(BaseModel):
+    tier: Literal["pi", "mini", "desktop"] | None = None
+
+
+class ModelSettingsUpdate(BaseModel):
+    overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelDownloadRequest(BaseModel):
@@ -616,7 +726,26 @@ class RecognitionLogListOut(BaseModel):
     offset: int
 
 
+class ConsoleOverviewOut(BaseModel):
+    enrollments: list[EnrollmentOut]
+    ready_count: int
+    attention: list[EnrollmentOut]
+    recent_activity: list[RecognitionLogOut]
+    last_seen: PresenceEntry | None = None
+    models_ready: bool
+    wyoming_enabled: bool
+    webhook_count: int
+    has_recognition: bool
+    hardware: str
+    models: dict[str, str] = Field(default_factory=dict)
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str
     detail: Any = None
+
+
+AppSettingsOut.model_rebuild()
+CapabilitiesOut.model_rebuild()
+ModelsStatusOut.model_rebuild()

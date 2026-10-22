@@ -135,24 +135,56 @@ class VisionEngine:
     def current_visual_model_version(self) -> str:
         return self.policy.effective_model_version("visual_reid", VISUAL_MODEL_VERSION)
 
-    def _face_crop_pixels(self, pixels: np.ndarray) -> np.ndarray:
+    def _detect_face_boxes(self, pixels: np.ndarray) -> list[list[float]]:
         det_session = self.policy.get_session("face_detector")
-        if det_session is not None:
-            from openrecognition.inference.scrfd import detect_faces_scrfd
+        if det_session is None:
+            return []
+        from openrecognition.inference.scrfd import detect_faces_scrfd
 
-            cfg = self.pool.onnx_config("face_detector")
-            size = int(cfg.get("input_size", 640))
-            conf = float(cfg.get("conf_thres", 0.5))
-            boxes = detect_faces_scrfd(
-                det_session,
-                pixels,
-                input_size=(size, size),
-                conf_thres=conf,
-            )
-            best = _largest_bbox(boxes)
-            if best is not None:
-                return _crop_pixels(pixels, best, margin=0.1)
+        cfg = self.pool.onnx_config("face_detector")
+        return detect_faces_scrfd(
+            det_session,
+            pixels,
+            input_size=(int(cfg.get("input_size", 640)), int(cfg.get("input_size", 640))),
+            conf_thres=float(cfg.get("conf_thres", 0.5)),
+        )
+
+    def inspect_image(self, image_bytes: bytes) -> dict[str, Any]:
+        pixels = _image_to_array(image_bytes)
+        gray = pixels.mean(axis=2)
+        gy, gx = np.gradient(gray)
+        sharpness = float(np.mean(np.sqrt(gx * gx + gy * gy)))
+        boxes = self._detect_face_boxes(pixels)
+        best = _largest_bbox(boxes)
+        h, w = pixels.shape[:2]
+        frac = 0.0
+        if best is not None:
+            frac = ((best[2] - best[0]) * (best[3] - best[1])) / max(1.0, float(w * h))
+        return {
+            "brightness": float(pixels.mean()),
+            "sharpness": sharpness,
+            "face_count": len(boxes),
+            "face_frac": frac,
+            "detector": self.policy.get_session("face_detector") is not None,
+        }
+
+    def _face_crop_pixels(self, pixels: np.ndarray) -> np.ndarray:
+        best = _largest_bbox(self._detect_face_boxes(pixels))
+        if best is not None:
+            return _crop_pixels(pixels, best, margin=0.1)
         return pixels
+
+    def _embed_face_session(self, pixels: np.ndarray, session, cfg: dict) -> np.ndarray:
+        from openrecognition.inference.onnx_embedding import embed_image_nchw
+
+        crop = self._face_crop_pixels(pixels)
+        return embed_image_nchw(
+            session,
+            crop,
+            size=int(cfg.get("input_size", 112)),
+            embed_dim=int(cfg["embed_dim"]) if cfg.get("embed_dim") else VISUAL_DIM,
+            input_norm=str(cfg.get("input_norm", "insightface")),
+        )
 
     def embed_face(self, image_bytes: bytes) -> np.ndarray:
         pixels = _image_to_array(image_bytes)
@@ -160,19 +192,11 @@ class VisionEngine:
         self.last_face_fallback_warning = self.policy.fallback_warning("face_embedding")
         session = self.policy.get_session("face_embedding")
         if session is not None:
-            from openrecognition.inference.onnx_embedding import embed_image_nchw
-
-            cfg = self.pool.onnx_config("face_embedding")
-            self.face_model_version = self.current_face_model_version()
-            crop = self._face_crop_pixels(pixels)
-            return embed_image_nchw(
-                session,
-                crop,
-                size=int(cfg.get("input_size", 112)),
-                embed_dim=int(cfg["embed_dim"]) if cfg.get("embed_dim") else VISUAL_DIM,
-                input_norm=str(cfg.get("input_norm", "insightface")),
-            )
+            return self._embed_face_session(pixels, session, self.pool.onnx_config("face_embedding"))
         return heuristic_visual_embedding(pixels, seed=43)
+
+    def embed_face_configured(self, image_bytes: bytes, *, session, cfg: dict) -> np.ndarray:
+        return self._embed_face_session(_image_to_array(image_bytes), session, cfg)
 
     def embed_visual(self, image_bytes: bytes, crop_bbox: list[float] | None = None) -> np.ndarray:
         pixels = _image_to_array(image_bytes)
@@ -184,24 +208,40 @@ class VisionEngine:
         self.last_visual_fallback_warning = self.policy.fallback_warning("visual_reid")
         session = self.policy.get_session("visual_reid")
         if session is not None:
-            cfg = self.pool.onnx_config("visual_reid")
-            self.visual_model_version = self.current_visual_model_version()
-            backend = str(cfg.get("backend", "nchw"))
-            size = int(cfg.get("input_size", 224))
-            dim = int(cfg["embed_dim"]) if cfg.get("embed_dim") else VISUAL_DIM
-            norm = str(cfg.get("input_norm", "imagenet"))
-            if backend == "classifier":
-                from openrecognition.inference.onnx_embedding import embed_image_classifier
+            return self._embed_visual_session(pixels, session, self.pool.onnx_config("visual_reid"))
+        return heuristic_visual_embedding(pixels, seed=44)
 
-                return embed_image_classifier(
-                    session, pixels, size=size, embed_dim=dim, input_norm=norm
-                )
-            from openrecognition.inference.onnx_embedding import embed_image_nchw
+    def _embed_visual_session(self, pixels: np.ndarray, session, cfg: dict) -> np.ndarray:
+        backend = str(cfg.get("backend", "nchw"))
+        size = int(cfg.get("input_size", 224))
+        dim = int(cfg["embed_dim"]) if cfg.get("embed_dim") else VISUAL_DIM
+        norm = str(cfg.get("input_norm", "imagenet"))
+        if backend == "classifier":
+            from openrecognition.inference.onnx_embedding import embed_image_classifier
 
-            return embed_image_nchw(
+            return embed_image_classifier(
                 session, pixels, size=size, embed_dim=dim, input_norm=norm
             )
-        return heuristic_visual_embedding(pixels, seed=44)
+        from openrecognition.inference.onnx_embedding import embed_image_nchw
+
+        return embed_image_nchw(
+            session, pixels, size=size, embed_dim=dim, input_norm=norm
+        )
+
+    def embed_visual_configured(
+        self,
+        image_bytes: bytes,
+        crop_bbox: list[float] | None = None,
+        *,
+        session,
+        cfg: dict,
+    ) -> np.ndarray:
+        pixels = _image_to_array(image_bytes)
+        if crop_bbox:
+            cropped = _crop_pixels(pixels, crop_bbox)
+            if cropped.size:
+                pixels = cropped
+        return self._embed_visual_session(pixels, session, cfg)
 
     def match_gallery(
         self,
@@ -253,6 +293,163 @@ class VisionEngine:
             )
         return results
 
+    def _version_groups(self, gallery: list[dict], etypes: set[str], active: str) -> dict[str, list[dict]]:
+        groups: dict[str, list[dict]] = {}
+        for item in gallery:
+            if item.get("type") not in etypes:
+                continue
+            version = str(item.get("model_version") or active)
+            groups.setdefault(version, []).append(item)
+        return groups
+
+    def _best_match(self, found: list[dict]) -> dict | None:
+        accepted = [item for item in found if item.get("entity_id")]
+        if accepted:
+            return max(accepted, key=lambda item: item["confidence"])
+        unknowns = [item for item in found if not item.get("entity_id")]
+        if unknowns:
+            return max(unknowns, key=lambda item: item["confidence"])
+        return None
+
+    def _match_face_versions(
+        self,
+        image_bytes: bytes,
+        gallery: list[dict],
+        min_confidence: float,
+        return_unknown: bool,
+        include_candidates: bool,
+        alternates: dict,
+        entities: list[dict],
+        candidates: list[dict],
+    ) -> None:
+        active = self.current_face_model_version()
+        groups = self._version_groups(gallery, {"person"}, active)
+        if not groups:
+            self.embed_face(image_bytes)
+            return
+        found: list[dict] = []
+        for version, rows in groups.items():
+            if version == active:
+                vector = self.embed_face(image_bytes)
+            else:
+                embedder = alternates.get(version)
+                if embedder is None:
+                    continue
+                vector = embedder(image_bytes)
+            found.extend(
+                self.match_gallery(
+                    vector,
+                    rows,
+                    {"person"},
+                    min_confidence,
+                    return_unknown,
+                    "face",
+                )
+            )
+            if include_candidates:
+                candidates.extend(
+                    rank_gallery_matches(
+                        vector,
+                        rows,
+                        {"person"},
+                        min_confidence,
+                        "face",
+                        "image",
+                    )
+                )
+        winner = self._best_match(found)
+        if winner:
+            entities.append(winner)
+
+    def _match_visual_versions(
+        self,
+        image_bytes: bytes,
+        boxes: list,
+        gallery: list[dict],
+        include_pets: bool,
+        include_objects: bool,
+        min_confidence: float,
+        return_unknown: bool,
+        include_candidates: bool,
+        alternates: dict,
+        entities: list[dict],
+        candidates: list[dict],
+        pipelines: list[str],
+    ) -> None:
+        active = self.current_visual_model_version()
+        etypes = set()
+        if include_pets:
+            etypes.add("pet")
+        if include_objects:
+            etypes.add("object")
+        groups = self._version_groups(gallery, etypes, active)
+        if not groups or not boxes:
+            return
+        usable = {
+            version: rows
+            for version, rows in groups.items()
+            if version == active or version in alternates
+        }
+        if not usable:
+            return
+        for bbox in boxes:
+            by_type: dict[str, list[dict]] = {"pet": [], "object": []}
+            for version, rows in usable.items():
+                if version == active:
+                    vector = self.embed_visual(image_bytes, bbox)
+                else:
+                    vector = alternates[version](image_bytes, bbox)
+                if include_pets:
+                    pipelines.append("pet")
+                    by_type["pet"].extend(
+                        self.match_gallery(
+                            vector,
+                            rows,
+                            {"pet"},
+                            min_confidence,
+                            return_unknown,
+                            "pet_identity",
+                        )
+                    )
+                    if include_candidates:
+                        candidates.extend(
+                            rank_gallery_matches(
+                                vector,
+                                rows,
+                                {"pet"},
+                                min_confidence,
+                                "pet_identity",
+                                "image",
+                            )
+                        )
+                if include_objects:
+                    pipelines.append("object")
+                    by_type["object"].extend(
+                        self.match_gallery(
+                            vector,
+                            rows,
+                            {"object"},
+                            min_confidence,
+                            return_unknown,
+                            "object_identity",
+                        )
+                    )
+                    if include_candidates:
+                        candidates.extend(
+                            rank_gallery_matches(
+                                vector,
+                                rows,
+                                {"object"},
+                                min_confidence,
+                                "object_identity",
+                                "image",
+                            )
+                        )
+            for kind in ("pet", "object"):
+                winner = self._best_match(by_type[kind])
+                if winner:
+                    entities.append(winner)
+
     def recognize_image(
         self,
         image_bytes: bytes,
@@ -264,6 +461,8 @@ class VisionEngine:
         return_unknown: bool = True,
         *,
         include_candidates: bool = False,
+        face_alternates: dict | None = None,
+        visual_alternates: dict | None = None,
     ) -> tuple[list[dict], dict | None]:
         entities: list[dict] = []
         pipelines: list[str] = []
@@ -272,83 +471,41 @@ class VisionEngine:
 
         if include_faces:
             pipelines.append("face")
-            vec = self.embed_face(image_bytes)
-            face_gallery = gallery_for_model(gallery, self.current_face_model_version())
-            entities.extend(
-                self.match_gallery(
-                    vec,
-                    face_gallery,
-                    {"person"},
-                    min_confidence,
-                    return_unknown,
-                    "face",
-                )
+            self._match_face_versions(
+                image_bytes,
+                gallery,
+                min_confidence,
+                return_unknown,
+                include_candidates,
+                face_alternates or {},
+                entities,
+                candidates,
             )
-            if include_candidates:
-                candidates.extend(
-                    rank_gallery_matches(
-                        vec,
-                        face_gallery,
-                        {"person"},
-                        min_confidence,
-                        "face",
-                        "image",
-                    )
-                )
 
         pixels = _image_to_array(image_bytes)
         if include_pets or include_objects:
-            visual_gallery = gallery_for_model(
-                gallery, self.current_visual_model_version()
+            boxes = detect_animal_bbox(pixels, self.pool, self.policy)
+            self._match_visual_versions(
+                image_bytes,
+                boxes,
+                gallery,
+                include_pets,
+                include_objects,
+                min_confidence,
+                return_unknown,
+                include_candidates,
+                visual_alternates or {},
+                entities,
+                candidates,
+                pipelines,
             )
-            for bbox in detect_animal_bbox(pixels, self.pool, self.policy):
-                vec = self.embed_visual(image_bytes, bbox)
-                if include_pets:
-                    pipelines.append("pet")
-                    entities.extend(
-                        self.match_gallery(
-                            vec,
-                            visual_gallery,
-                            {"pet"},
-                            min_confidence,
-                            return_unknown,
-                            "pet_identity",
-                        )
-                    )
-                    if include_candidates:
-                        candidates.extend(
-                            rank_gallery_matches(
-                                vec,
-                                visual_gallery,
-                                {"pet"},
-                                min_confidence,
-                                "pet_identity",
-                                "image",
-                            )
-                        )
-                if include_objects:
-                    pipelines.append("object")
-                    entities.extend(
-                        self.match_gallery(
-                            vec,
-                            visual_gallery,
-                            {"object"},
-                            min_confidence,
-                            return_unknown,
-                            "object_identity",
-                        )
-                    )
-                    if include_candidates:
-                        candidates.extend(
-                            rank_gallery_matches(
-                                vec,
-                                visual_gallery,
-                                {"object"},
-                                min_confidence,
-                                "object_identity",
-                                "image",
-                            )
-                        )
+
+        accepted = {item["recognition_type"] for item in entities if item.get("entity_id")}
+        entities[:] = [
+            item
+            for item in entities
+            if item.get("entity_id") or item["recognition_type"] not in accepted
+        ]
 
         diagnostics = None
         if include_candidates:

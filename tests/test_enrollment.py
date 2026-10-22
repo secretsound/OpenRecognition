@@ -32,10 +32,49 @@ def test_enrollment_flow(client, auth_headers):
     assert r2.status_code == 200
 
     r3 = client.get("/v1/enrollments", headers=auth_headers)
-    assert any(e["id"] == eid for e in r3.json())
+    listed = r3.json()
+    row = next(e for e in listed if e["id"] == eid)
+    assert row["quality"] is not None
+    assert "last_seen_at" in row
 
     r4 = client.post(f"/v1/enrollments/{eid}/evaluate", headers=auth_headers)
     assert r4.status_code == 200
+
+
+def test_voice_quality_asks_for_more_phrases_under_eight(client, auth_headers):
+    files = [("files", (f"p{i}.wav", wav_bytes(freq=440), "audio/wav")) for i in range(3)]
+    r = client.post(
+        "/v1/enrollments",
+        headers=auth_headers,
+        data={"type": "person", "label": "voicefew"},
+        files=files,
+    )
+    assert r.status_code == 200
+    eid = r.json()["id"]
+    ev = client.post(f"/v1/enrollments/{eid}/evaluate", headers=auth_headers)
+    assert ev.status_code == 200
+    audio = next(m for m in ev.json()["modalities"] if m["modality"] == "audio")
+    assert audio["sample_count"] == 3
+    assert "recommend_more_voice_samples" in audio["issues"]
+    assert audio["score"] < 0.5
+
+
+def test_voice_quality_reaches_high_score_with_eight_samples(client, auth_headers):
+    files = [("files", (f"p{i}.wav", wav_bytes(freq=440), "audio/wav")) for i in range(8)]
+    r = client.post(
+        "/v1/enrollments",
+        headers=auth_headers,
+        data={"type": "person", "label": "voicefull"},
+        files=files,
+    )
+    assert r.status_code == 200
+    eid = r.json()["id"]
+    ev = client.post(f"/v1/enrollments/{eid}/evaluate", headers=auth_headers)
+    assert ev.status_code == 200
+    audio = next(m for m in ev.json()["modalities"] if m["modality"] == "audio")
+    assert audio["sample_count"] == 8
+    assert audio["score"] >= 0.85
+    assert "recommend_more_voice_samples" not in audio["issues"]
 
 
 def test_evaluate_returns_per_modality_quality(client, auth_headers):
@@ -182,6 +221,41 @@ def test_enrollment_threshold_patch_can_be_cleared(client, auth_headers):
         json={"threshold": 1.5},
     )
     assert invalid.status_code == 422
+
+
+def test_enrollment_wyoming_min_confidence_patch(client, auth_headers):
+    r = client.post(
+        "/v1/enrollments",
+        headers=auth_headers,
+        data={"type": "person", "label": "noisy-mic"},
+    )
+    assert r.status_code == 200
+    eid = r.json()["id"]
+    assert r.json()["wyoming_min_confidence"] is None
+
+    set_custom = client.patch(
+        f"/v1/enrollments/{eid}",
+        headers=auth_headers,
+        json={"wyoming_min_confidence": 0.55},
+    )
+    assert set_custom.status_code == 200
+    assert set_custom.json()["wyoming_min_confidence"] == 0.55
+
+    kept = client.patch(
+        f"/v1/enrollments/{eid}",
+        headers=auth_headers,
+        json={"enabled": True},
+    )
+    assert kept.status_code == 200
+    assert kept.json()["wyoming_min_confidence"] == 0.55
+
+    cleared = client.patch(
+        f"/v1/enrollments/{eid}",
+        headers=auth_headers,
+        json={"wyoming_min_confidence": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["wyoming_min_confidence"] is None
 
 
 def test_enrollment_external_ids_patch(client, auth_headers):

@@ -16,7 +16,7 @@ def metrics(
     lines = [
         "# HELP openrecognition_info Service info",
         "openrecognition_info 1",
-        f'openrecognition_pack{{pack="{state.settings.pack}"}} 1',
+        f'openrecognition_hardware{{tier="{state.hardware_info()["effective"]}"}} 1',
         f"openrecognition_models_loaded {1 if state.pool.models_loaded else 0}",
         f"openrecognition_enrollments {len(state.gallery.list_enrollments())}",
         f"openrecognition_maintenance {1 if state.maintenance_mode else 0}",

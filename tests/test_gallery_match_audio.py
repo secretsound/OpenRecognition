@@ -3,7 +3,11 @@
 import numpy as np
 
 from openrecognition.gallery.db import Database
-from openrecognition.gallery.match import accept_threshold, rank_gallery_matches
+from openrecognition.gallery.match import (
+    accept_threshold,
+    rank_gallery_matches,
+    wyoming_threshold,
+)
 from openrecognition.gallery.store import GalleryStore
 from openrecognition.inference.inference_policy import InferencePolicy
 from openrecognition.inference.session_pool import ModelSessionPool
@@ -143,3 +147,118 @@ def test_enrollment_threshold_raises_the_bar(tmp_path):
     hits = speaker.match_gallery(query, both, 0.5, False)
     assert [h["label"] for h in hits] == ["Loose"]
     assert hits[0]["threshold_used"] == 0.5
+
+
+def test_wyoming_threshold_can_go_below_default(tmp_path):
+    assert wyoming_threshold({"wyoming_min_confidence": 0.5, "threshold": 0.9}, 0.75) == 0.5
+    assert accept_threshold({"wyoming_min_confidence": 0.5, "threshold": 0.9}, 0.75) == 0.9
+    assert wyoming_threshold({"threshold": 0.9}, 0.75) == 0.9
+    assert wyoming_threshold({}, 0.75) == 0.75
+
+    data_dir = tmp_path / "data"
+    db = Database(data_dir / "openrecognition.db")
+    store = GalleryStore(db, data_dir)
+    speaker, _vision = _engines(tmp_path)
+    version = speaker.current_model_version()
+    enrolled = _axis(EMBED_DIM)
+    query = _axis(EMBED_DIM, 0, 0.7)
+    query[1] = np.float32(np.sqrt(1.0 - 0.49))
+
+    noisy = store.create_enrollment(EnrollmentType.person, "NoisyMic")
+    store.add_embedding(noisy["id"], "audio", enrolled, version)
+    store.patch_enrollment(noisy["id"], wyoming_min_confidence=0.55)
+    gallery = store.get_embeddings_for_match(modality="audio", model_version=version)
+
+    default_hits = speaker.match_gallery(query, gallery, 0.75, False)
+    assert default_hits == []
+
+    wyoming_hits = speaker.match_gallery(
+        query, gallery, 0.75, False, threshold_fn=wyoming_threshold
+    )
+    assert [h["label"] for h in wyoming_hits] == ["NoisyMic"]
+    assert wyoming_hits[0]["threshold_used"] == 0.55
+
+
+def test_match_retained_keeps_the_previous_voice_model(tmp_path):
+    import io
+    import wave
+
+    speaker, _vision = _engines(tmp_path)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(b"\x00\x00" * 1600)
+    audio = buf.getvalue()
+    active_vec = speaker.embed(audio)
+    retained = _axis(EMBED_DIM, index=3)
+    gallery = [
+        {
+            "id": "current",
+            "label": "Current",
+            "type": "person",
+            "threshold": None,
+            "model_version": speaker.current_model_version(),
+            "vector": -active_vec,
+        },
+        {
+            "id": "kept",
+            "label": "Kept",
+            "type": "person",
+            "threshold": None,
+            "model_version": "old-voice",
+            "vector": retained,
+        },
+    ]
+    outcome = speaker.match_retained(
+        audio,
+        gallery,
+        0.75,
+        False,
+        alternates={"old-voice": lambda _audio: retained},
+    )
+    assert outcome["matches"][0]["label"] == "Kept"
+    assert outcome["model_version"] == "old-voice"
+    assert outcome["comparable"] == 2
+
+
+def test_recognize_image_keeps_a_previous_face_model(tmp_path):
+    import io
+
+    from PIL import Image
+
+    _speaker, vision = _engines(tmp_path)
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), color=(20, 40, 80)).save(buf, format="PNG")
+    image = buf.getvalue()
+    active_vec = vision.embed_face(image)
+    retained = _axis(512, index=4)
+    gallery = [
+        {
+            "id": "current",
+            "label": "Current",
+            "type": "person",
+            "threshold": None,
+            "model_version": vision.current_face_model_version(),
+            "vector": -active_vec,
+        },
+        {
+            "id": "kept",
+            "label": "Kept",
+            "type": "person",
+            "threshold": None,
+            "model_version": "old-face",
+            "vector": retained,
+        },
+    ]
+    entities, _diag = vision.recognize_image(
+        image,
+        gallery,
+        include_pets=False,
+        include_objects=False,
+        min_confidence=0.75,
+        return_unknown=False,
+        face_alternates={"old-face": lambda _image: retained},
+    )
+    assert [item["label"] for item in entities] == ["Kept"]

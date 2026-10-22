@@ -1,23 +1,85 @@
+/*
+ * Theme-independent design tokens.
+ * Colors live in theme.ts (palettes + accents) and are written to <html>
+ * as --or-* variables at runtime by useTheme, so they reach teleported
+ * modals, drawers and popovers too.
+ */
 :root {
-  --or-page-gap: 24px;
-  --or-section-gap: 16px;
-  --or-inline-gap: 12px;
+  /* Type */
+  --or-font-sans: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --or-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  --or-layout-max: 1200px;
+  --or-text-micro: 0.75rem; /* 12 */
+  --or-text-small: 0.8125rem; /* 13 */
+  --or-text-body: 0.875rem; /* 14 */
+  --or-text-lead: 1rem; /* 16 */
+  --or-text-heading: 1.125rem; /* 18 */
+  --or-text-title: clamp(1.5rem, 1.3rem + 0.8vw, 1.75rem); /* 24–28 */
+  --or-text-display: clamp(1.875rem, 1.5rem + 1.5vw, 2.5rem); /* 30–40 */
 
-  --or-page-bg-light: #f4f5f7;
-  --or-page-bg-dark: #0e0f12;
-  --or-sider-light: #ffffff;
-  --or-sider-dark: #14161a;
-  --or-card-border-light: rgba(15, 23, 42, 0.08);
-  --or-card-border-dark: rgba(255, 255, 255, 0.08);
+  --or-leading-tight: 1.2;
+  --or-leading-snug: 1.35;
+  --or-leading: 1.5;
 
-  --or-modality-audio: #36cfc9;
-  --or-modality-image: #7c5cff;
-  --or-modality-pet: #e8a317;
-  --or-modality-object: #8b9bb4;
+  --or-tracking-tight: -0.02em;
+  --or-tracking-caps: 0.06em;
 
-  --or-modal-max-width: 720px;
-  --or-modal-narrow: 440px;
-  --or-radius: 12px;
+  /* Space */
+  --or-space-1: 4px;
+  --or-space-2: 8px;
+  --or-space-3: 12px;
+  --or-space-4: 16px;
+  --or-space-5: 20px;
+  --or-space-6: 24px;
+  --or-space-8: 32px;
+  --or-space-10: 40px;
+  --or-space-12: 48px;
+  --or-space-16: 64px;
+
+  /* Shape */
+  --or-radius-sm: 8px;
+  --or-radius-md: 10px;
+  --or-radius-lg: 14px;
+  --or-radius-xl: 20px;
+  --or-radius-full: 999px;
+
+  /* Layout */
+  --or-content-max: 1320px;
+  --or-prose-max: 680px;
+  --or-sidebar-w: 248px;
+  --or-rail-w: 60px;
+  --or-topbar-h: 52px;
+  --or-bottombar-h: 60px;
+  --or-page-x: var(--or-space-6);
+  --or-page-y: var(--or-space-6);
+
+  /* Motion */
+  --or-dur-fast: 120ms;
+  --or-dur: 180ms;
+  --or-dur-slow: 260ms;
+  --or-ease: cubic-bezier(0.2, 0, 0, 1);
+  --or-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* Derived accent tints (accent itself is set by useTheme) */
+  --or-accent-tint: color-mix(in oklab, var(--or-accent) 11%, transparent);
+  --or-accent-tint-strong: color-mix(in oklab, var(--or-accent) 18%, transparent);
+  --or-focus-ring: 0 0 0 3px color-mix(in oklab, var(--or-accent) 28%, transparent);
+
+  /* Breakpoints (reference only; CSS can't use vars in media queries) */
+  /* sm: 640px · md: 900px · lg: 1200px */
+}
+
+@media (max-width: 899px) {
+  :root {
+    --or-page-x: var(--or-space-4);
+    --or-page-y: var(--or-space-5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --or-dur-fast: 0ms;
+    --or-dur: 0ms;
+    --or-dur-slow: 0ms;
+  }
 }

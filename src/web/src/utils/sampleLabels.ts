@@ -3,6 +3,8 @@
 export const sampleSourceLabels: Record<string, string> = {
   upload: "Upload",
   voice_wizard: "Guided voice",
+  face_wizard: "Guided face",
+  photo_wizard: "Guided photo",
   enrollment_create: "Initial enrollment",
   match_learn: "Learned match",
   unknown: "Unknown",

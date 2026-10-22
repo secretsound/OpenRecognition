@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
-  NCard,
   NButton,
   NButtonGroup,
   NUpload,
@@ -9,7 +8,6 @@ import {
   NTag,
   NSpace,
   NIcon,
-  NDivider,
   useMessage,
 } from "naive-ui";
 import type { UploadFileInfo } from "naive-ui";
@@ -17,89 +15,132 @@ import {
   MicOutline,
   CloudUploadOutline,
   CameraOutline,
-  MusicalNotesOutline,
-  ImagesOutline,
   FolderOpenOutline,
   VideocamOutline,
+  ImagesOutline,
 } from "@vicons/ionicons5";
 import CameraCapture from "@/components/CameraCapture.vue";
+import SegmentedControl from "@/components/kit/SegmentedControl.vue";
 import type { EnrollmentType, QualityInfo } from "@/types/api";
-import {
-  mediaConfigFor,
-  modalitySampleCount,
-  sampleMethodsFor,
-} from "@/utils/enrollmentMedia";
+import { mediaConfigFor, modalitySampleCount } from "@/utils/enrollmentMedia";
+
+type TeachKind = "voice" | "photo" | "video";
 
 const fileList = defineModel<UploadFileInfo[]>("fileList", { required: true });
 
-const props = defineProps<{
-  enrollmentType: EnrollmentType;
-  uploading?: boolean;
-  quality?: QualityInfo | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    enrollmentType: EnrollmentType;
+    uploading?: boolean;
+    quality?: QualityInfo | null;
+    chrome?: boolean;
+  }>(),
+  { chrome: true },
+);
 
 const emit = defineEmits<{
   upload: [];
+  done: [];
   "open-voice-wizard": [];
   "open-face-wizard": [];
   "open-photo-wizard": [];
   "open-video-wizard": [];
 }>();
 
-const supportsVideoWizard = computed(
-  () =>
-    props.enrollmentType === "person" ||
-    props.enrollmentType === "pet" ||
-    props.enrollmentType === "object" ||
-    props.enrollmentType === "sound",
-);
-
-const supportsPhotoWizard = computed(
-  () => props.enrollmentType === "pet" || props.enrollmentType === "object",
-);
-
 const message = useMessage();
 const uploadMode = ref<"files" | "camera">("files");
 const cameraRef = ref<InstanceType<typeof CameraCapture> | null>(null);
 
-const mediaConfig = computed(() => mediaConfigFor(props.enrollmentType));
-const methods = computed(() => sampleMethodsFor(props.enrollmentType));
-
-const supportsVoiceWizard = computed(
-  () => props.enrollmentType === "person" || props.enrollmentType === "sound",
+const kind = ref<TeachKind>(
+  props.enrollmentType === "pet" || props.enrollmentType === "object" ? "photo" : "voice",
 );
 
-const showSplitLayout = computed(() => props.enrollmentType === "person");
-
-const supportsCamera = computed(
-  () =>
-    props.enrollmentType === "person" ||
-    props.enrollmentType === "pet" ||
-    props.enrollmentType === "object",
-);
-
-const pendingCount = computed(() => fileList.value.length);
-
-const voiceSampleCount = computed(() =>
-  modalitySampleCount(props.quality?.modalities, "audio"),
-);
-
-const faceSampleCount = computed(() =>
-  modalitySampleCount(props.quality?.modalities, "image"),
-);
-
-const voiceStatusTag = computed(() => {
-  const n = voiceSampleCount.value;
-  if (n === null) return null;
-  if (n === 0) return { type: "warning" as const, label: "No voice samples" };
-  return { type: "success" as const, label: `${n} voice sample${n === 1 ? "" : "s"}` };
+const kindOptions = computed(() => {
+  if (props.enrollmentType === "person") {
+    return [
+      { value: "voice" as const, label: "Voice", hint: "Spoken phrases" },
+      { value: "photo" as const, label: "Photo", hint: "Face photos" },
+      { value: "video" as const, label: "Video", hint: "A short clip" },
+    ];
+  }
+  if (props.enrollmentType === "sound") {
+    return [
+      { value: "voice" as const, label: "Sound", hint: "Audio clips" },
+      { value: "video" as const, label: "Video", hint: "A short clip" },
+    ];
+  }
+  return [
+    { value: "photo" as const, label: "Photo", hint: "Still photos" },
+    { value: "video" as const, label: "Video", hint: "A short clip" },
+  ];
 });
 
-const faceStatusTag = computed(() => {
-  const n = faceSampleCount.value;
-  if (n === null) return null;
-  if (n === 0) return { type: "default" as const, label: "No face photos yet" };
-  return { type: "success" as const, label: `${n} face sample${n === 1 ? "" : "s"}` };
+const mediaConfig = computed(() => mediaConfigFor(props.enrollmentType));
+const pendingCount = computed(() => fileList.value.length);
+
+const voiceCount = computed(() => modalitySampleCount(props.quality?.modalities, "audio") ?? 0);
+const photoCount = computed(() => modalitySampleCount(props.quality?.modalities, "image") ?? 0);
+
+const accept = computed(() => {
+  if (kind.value === "voice") return "audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.webm";
+  if (kind.value === "photo") return "image/*,.jpg,.jpeg,.png,.webp";
+  return "video/*,.mp4,.webm,.mov";
+});
+
+const formatTags = computed(() => {
+  if (kind.value === "voice") return ["WAV", "MP3", "FLAC", "OGG"];
+  if (kind.value === "photo") return ["JPEG", "PNG", "WebP"];
+  return ["MP4", "WebM", "MOV"];
+});
+
+const copy = computed(() => {
+  if (kind.value === "voice" && props.enrollmentType === "sound") {
+    return {
+      title: "Teach this sound",
+      body: "Record a few clear clips of the same event. Variation in timing helps more than one long file.",
+      guided: "Start guided capture",
+      upload: "Or drop audio files you already have.",
+    };
+  }
+  if (kind.value === "voice") {
+    return {
+      title: voiceCount.value > 0 ? "Improve this voice" : "Teach this voice",
+      body:
+        voiceCount.value > 0
+          ? "New phrases plus a few ways you actually talk to a speaker — next to you, quieter, or from across the room."
+          : "Read short sentences the way you actually talk to a speaker — next to you, or calling from across the room — not just one careful take.",
+      guided: voiceCount.value > 0 ? "Record more phrases" : "Start voice training",
+      upload: "Or drop voice clips if you already recorded them.",
+    };
+  }
+  if (kind.value === "photo" && props.enrollmentType === "person") {
+    return {
+      title: "Teach this face",
+      body:
+        photoCount.value > 0
+          ? "Add new angles — from the side, closer, or a few steps back like a doorbell would see you."
+          : "A doorbell or room camera rarely sees a passport photo. We'll walk through the views that actually show up.",
+      guided: photoCount.value > 0 ? "Add more face photos" : "Start face training",
+      upload: "Or add photos from files or the camera.",
+    };
+  }
+  if (kind.value === "photo") {
+    return {
+      title: props.enrollmentType === "pet" ? "Teach this pet" : "Teach this object",
+      body:
+        photoCount.value > 0
+          ? "New angles and distances help more than another copy of the same shot."
+          : mediaConfig.value.detail,
+      guided: photoCount.value > 0 ? "Add more photos" : "Start guided photos",
+      upload: "Or drop photos you already have.",
+    };
+  }
+  return {
+    title: "Teach from video",
+    body: "Trim a short clip. The server will pull the useful frames and audio.",
+    guided: "Trim a video clip",
+    upload: "Or drop a video file to trim next.",
+  };
 });
 
 function clearFiles() {
@@ -107,415 +148,209 @@ function clearFiles() {
   cameraRef.value?.stopCamera();
 }
 
+watch(kind, () => {
+  clearFiles();
+  uploadMode.value = "files";
+});
+
+function startGuided() {
+  if (kind.value === "voice") emit("open-voice-wizard");
+  else if (kind.value === "video") emit("open-video-wizard");
+  else if (props.enrollmentType === "person") emit("open-face-wizard");
+  else emit("open-photo-wizard");
+}
+
 function onCameraCapture(file: File) {
   const id = `camera-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   fileList.value = [
     ...fileList.value,
-    {
-      id,
-      name: file.name,
-      status: "finished",
-      file,
-    },
+    { id, name: file.name, status: "finished", file },
   ];
   message.success("Photo added — capture more or upload when ready");
 }
-
-const cameraHint = computed(() => {
-  if (props.enrollmentType === "person") {
-    return "Capture face photos from different angles. Each capture is added to your upload queue.";
-  }
-  if (props.enrollmentType === "pet") {
-    return "Capture clear whole-body or face shots. Add several before uploading.";
-  }
-  return "Capture the object from a few angles, then upload all at once.";
-});
 </script>
 
 <template>
-  <NCard class="samples-card" :bordered="false">
-    <template #header>
-      <div class="card-header">
-        <div>
-          <h2 class="card-title">How to add samples</h2>
-          <p class="card-subtitle">{{ mediaConfig.hint }}</p>
-        </div>
+  <div class="teach">
+    <div v-if="chrome" class="teach__head">
+      <div>
+        <h2 class="or-heading">Add samples</h2>
+        <p class="or-muted or-small" style="margin-top: 4px">
+          Pick what to teach, then record or upload. One kind at a time is easier.
+        </p>
+      </div>
+      <div class="teach__head-actions">
         <NTag v-if="pendingCount > 0" round :bordered="false" type="info">
           {{ pendingCount }} file{{ pendingCount === 1 ? "" : "s" }} selected
         </NTag>
+        <NButton quaternary @click="emit('done')">Done</NButton>
       </div>
-    </template>
-
-    <div class="samples-grid" :class="{ 'samples-grid--split': showSplitLayout }">
-      <!-- Voice / guided path -->
-      <section
-        v-if="supportsVoiceWizard"
-        class="method-panel method-panel--voice"
-      >
-        <div class="method-icon-wrap method-icon-wrap--voice">
-          <NIcon size="28" :component="enrollmentType === 'sound' ? MusicalNotesOutline : MicOutline" />
-        </div>
-        <div class="method-body">
-          <div class="method-head">
-            <h3 class="method-title">
-              {{ enrollmentType === "sound" ? "Record a sound" : "Record a voice" }}
-            </h3>
-            <NTag
-              v-if="voiceStatusTag"
-              size="small"
-              :type="voiceStatusTag.type"
-              :bordered="false"
-            >
-              {{ voiceStatusTag.label }}
-            </NTag>
-          </div>
-          <p class="method-desc">
-            {{
-              enrollmentType === "sound"
-                ? "Record a few clips of this sound with the step-by-step wizard."
-                : "Read short phrases so the server learns how you sound. A quiet room works best."
-            }}
-          </p>
-          <NSpace vertical :size="8">
-            <NButton type="primary" class="method-cta" @click="emit('open-voice-wizard')">
-              <template #icon>
-                <NIcon><MicOutline /></NIcon>
-              </template>
-              Start guided voice
-            </NButton>
-            <NButton
-              v-if="enrollmentType === 'person'"
-              secondary
-              class="method-cta"
-              @click="emit('open-face-wizard')"
-            >
-              Guided face angles
-            </NButton>
-            <NButton
-              v-if="supportsVideoWizard"
-              secondary
-              class="method-cta"
-              @click="emit('open-video-wizard')"
-            >
-              <template #icon>
-                <NIcon><VideocamOutline /></NIcon>
-              </template>
-              Trim video clip
-            </NButton>
-          </NSpace>
-        </div>
-      </section>
-
-      <section
-        v-else-if="supportsPhotoWizard"
-        class="method-panel method-panel--voice"
-      >
-        <div class="method-icon-wrap method-icon-wrap--voice">
-          <NIcon size="28"><ImagesOutline /></NIcon>
-        </div>
-        <div class="method-body">
-          <h3 class="method-title">Guided photos</h3>
-          <p class="method-desc">{{ mediaConfig.detail }}</p>
-          <NButton type="primary" class="method-cta" @click="emit('open-photo-wizard')">
-            Start guided photo capture
-          </NButton>
-          <NButton
-            v-if="supportsVideoWizard"
-            secondary
-            class="method-cta"
-            style="margin-top: 8px"
-            @click="emit('open-video-wizard')"
-          >
-            Trim video clip
-          </NButton>
-        </div>
-      </section>
-
-      <NDivider
-        v-if="showSplitLayout"
-        vertical
-        class="samples-divider"
-      />
-
-      <!-- File upload path -->
-      <section
-        class="method-panel method-panel--upload"
-        :class="{ 'method-panel--full': !showSplitLayout }"
-      >
-        <div class="method-icon-wrap method-icon-wrap--upload">
-          <NIcon
-            size="28"
-            :component="
-              enrollmentType === 'pet' || enrollmentType === 'object'
-                ? ImagesOutline
-                : enrollmentType === 'sound'
-                  ? MusicalNotesOutline
-                  : CameraOutline
-            "
-          />
-        </div>
-        <div class="method-body method-body--grow">
-          <div class="method-head">
-            <h3 class="method-title">
-              {{
-                enrollmentType === "person"
-                  ? "Upload files"
-                  : methods[0]?.title ?? "Upload"
-              }}
-            </h3>
-            <NTag
-              v-if="enrollmentType === 'person' && faceStatusTag"
-              size="small"
-              :type="faceStatusTag.type"
-              :bordered="false"
-            >
-              {{ faceStatusTag.label }}
-            </NTag>
-          </div>
-          <p class="method-desc">
-            {{
-              enrollmentType === "person"
-                ? "Drop face photos, voice clips, or both — we detect the type automatically."
-                : mediaConfig.detail
-            }}
-          </p>
-
-          <NButtonGroup v-if="supportsCamera" class="upload-mode-toggle">
-            <NButton
-              :secondary="uploadMode === 'files'"
-              :quaternary="uploadMode !== 'files'"
-              size="small"
-              @click="uploadMode = 'files'"
-            >
-              <template #icon>
-                <NIcon><FolderOpenOutline /></NIcon>
-              </template>
-              Browse files
-            </NButton>
-            <NButton
-              :secondary="uploadMode === 'camera'"
-              :quaternary="uploadMode !== 'camera'"
-              size="small"
-              @click="uploadMode = 'camera'"
-            >
-              <template #icon>
-                <NIcon><CameraOutline /></NIcon>
-              </template>
-              Use camera
-            </NButton>
-          </NButtonGroup>
-
-          <div v-if="!supportsCamera || uploadMode === 'files'" class="upload-zone">
-            <NUpload
-              v-model:file-list="fileList"
-              multiple
-              directory-dnd
-              :accept="mediaConfig.accept"
-              :default-upload="false"
-              :show-file-list="true"
-              class="samples-upload"
-            >
-              <NUploadDragger>
-                <div class="dragger-inner">
-                  <div class="dragger-icon">
-                    <NIcon size="40" :depth="3">
-                      <CloudUploadOutline />
-                    </NIcon>
-                  </div>
-                  <p class="dragger-title">Drag files here or click to browse</p>
-                  <p class="dragger-hint">Multiple files supported</p>
-                  <NSpace :size="6" justify="center" class="format-tags dragger-tags">
-                    <NTag
-                      v-for="tag in mediaConfig.formatTags"
-                      :key="tag"
-                      size="tiny"
-                      :bordered="false"
-                    >
-                      {{ tag }}
-                    </NTag>
-                  </NSpace>
-                </div>
-              </NUploadDragger>
-            </NUpload>
-          </div>
-
-          <div v-else class="camera-zone">
-            <CameraCapture
-              ref="cameraRef"
-              compact
-              :max-height="220"
-              capture-label="Add photo"
-              :hint="cameraHint"
-              facing-mode="user"
-              @capture="onCameraCapture"
-            />
-            <NUpload
-              v-if="pendingCount > 0"
-              v-model:file-list="fileList"
-              multiple
-              :show-trigger="false"
-              :default-upload="false"
-              class="samples-upload samples-upload--hidden-trigger camera-queue"
-            />
-          </div>
-
-          <div v-if="pendingCount > 0" class="upload-actions">
-            <NButton quaternary size="small" :disabled="uploading" @click="clearFiles">
-              Clear all
-            </NButton>
-            <NButton type="primary" :loading="uploading" @click="emit('upload')">
-              Upload {{ pendingCount }} file{{ pendingCount === 1 ? "" : "s" }}
-            </NButton>
-          </div>
-        </div>
-      </section>
     </div>
-  </NCard>
+
+    <SegmentedControl
+      v-model="kind"
+      aria-label="What to teach"
+      :options="kindOptions"
+    />
+
+    <section class="or-surface or-surface--md teach-pane">
+      <div class="teach-pane__intro">
+        <div>
+          <p class="or-caps">{{ copy.title }}</p>
+          <p class="or-muted" style="margin-top: 6px">{{ copy.body }}</p>
+        </div>
+        <div class="teach-pane__counts">
+          <span v-if="kind === 'voice'" class="or-muted or-small">
+            {{ voiceCount }} voice sample{{ voiceCount === 1 ? "" : "s" }}
+          </span>
+          <span v-else-if="kind === 'photo'" class="or-muted or-small">
+            {{ photoCount }} photo{{ photoCount === 1 ? "" : "s" }}
+          </span>
+        </div>
+      </div>
+
+      <NButton type="primary" @click="startGuided">
+        <template #icon>
+          <NIcon>
+            <MicOutline v-if="kind === 'voice'" />
+            <VideocamOutline v-else-if="kind === 'video'" />
+            <ImagesOutline v-else />
+          </NIcon>
+        </template>
+        {{ copy.guided }}
+      </NButton>
+
+      <p class="or-muted or-small" style="margin-top: 18px">{{ copy.upload }}</p>
+
+      <NButtonGroup v-if="kind === 'photo'" class="upload-mode-toggle">
+        <NButton
+          :secondary="uploadMode === 'files'"
+          :quaternary="uploadMode !== 'files'"
+          size="small"
+          @click="uploadMode = 'files'"
+        >
+          <template #icon>
+            <NIcon><FolderOpenOutline /></NIcon>
+          </template>
+          Browse files
+        </NButton>
+        <NButton
+          :secondary="uploadMode === 'camera'"
+          :quaternary="uploadMode !== 'camera'"
+          size="small"
+          @click="uploadMode = 'camera'"
+        >
+          <template #icon>
+            <NIcon><CameraOutline /></NIcon>
+          </template>
+          Use camera
+        </NButton>
+      </NButtonGroup>
+
+      <div v-if="kind !== 'photo' || uploadMode === 'files'" class="upload-zone">
+        <NUpload
+          v-model:file-list="fileList"
+          multiple
+          directory-dnd
+          :accept="accept"
+          :default-upload="false"
+          :show-file-list="true"
+          class="samples-upload"
+        >
+          <NUploadDragger>
+            <div class="dragger-inner">
+              <NIcon size="36" :depth="3"><CloudUploadOutline /></NIcon>
+              <p class="dragger-title">Drag files here or click to browse</p>
+              <NSpace :size="6" justify="center" class="dragger-tags">
+                <NTag v-for="tag in formatTags" :key="tag" size="tiny" :bordered="false">
+                  {{ tag }}
+                </NTag>
+              </NSpace>
+            </div>
+          </NUploadDragger>
+        </NUpload>
+      </div>
+
+      <div v-else class="camera-zone">
+        <CameraCapture
+          ref="cameraRef"
+          compact
+          :max-height="220"
+          capture-label="Add photo"
+          hint="Capture a few angles, then upload them together."
+          facing-mode="user"
+          @capture="onCameraCapture"
+        />
+        <NUpload
+          v-if="pendingCount > 0"
+          v-model:file-list="fileList"
+          multiple
+          :show-trigger="false"
+          :default-upload="false"
+          class="samples-upload samples-upload--hidden-trigger"
+        />
+      </div>
+
+      <div v-if="pendingCount > 0" class="upload-actions">
+        <NButton quaternary size="small" :disabled="uploading" @click="clearFiles">
+          Clear
+        </NButton>
+        <NButton type="primary" :loading="uploading" @click="emit('upload')">
+          Upload {{ pendingCount }} file{{ pendingCount === 1 ? "" : "s" }}
+        </NButton>
+      </div>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.samples-card :deep(.n-card-header) {
-  padding-bottom: 8px;
+.teach {
+  display: flex;
+  flex-direction: column;
+  gap: var(--or-space-4);
 }
 
-.card-header {
+.teach__head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  width: 100%;
 }
 
-.card-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.card-subtitle {
-  margin: 4px 0 0;
-  font-size: 0.85rem;
-  color: var(--n-text-color-3);
-  line-height: 1.4;
-  max-width: 520px;
-}
-
-.samples-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.samples-grid--split {
-  flex-direction: column;
-  gap: var(--or-section-gap);
-}
-
-.samples-divider {
-  display: none;
-}
-
-.method-panel {
-  display: flex;
-  gap: 16px;
-  padding: 20px;
-  border-radius: 10px;
-  background: var(--n-color-modal);
-  border: 1px solid var(--n-border-color);
-  flex: 1;
-  min-width: 0;
-}
-
-.method-panel--full {
-  width: 100%;
-}
-
-.method-icon-wrap {
-  flex-shrink: 0;
-  width: 52px;
-  height: 52px;
+.teach__head-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 12px;
+  gap: 10px;
 }
 
-.method-icon-wrap--voice {
-  color: var(--n-primary-color);
-  background: color-mix(in srgb, var(--n-primary-color) 14%, transparent);
-}
-
-.method-icon-wrap--upload {
-  color: var(--n-text-color-2);
-  background: var(--n-action-color);
-}
-
-.method-body {
-  flex: 1;
-  min-width: 0;
+.teach-pane {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
 }
 
-.method-body--grow {
-  flex: 1;
-}
-
-.method-head {
+.teach-pane__intro {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.method-title {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.method-desc {
-  margin: 6px 0 10px;
-  font-size: 0.82rem;
-  color: var(--n-text-color-3);
-  line-height: 1.5;
+  gap: 16px;
+  width: 100%;
+  margin-bottom: 14px;
 }
 
 .upload-mode-toggle {
-  margin-bottom: 12px;
+  margin: 10px 0 4px;
 }
 
 .upload-zone,
 .camera-zone {
-  margin-top: 4px;
+  width: 100%;
+  margin-top: 10px;
 }
 
 .camera-zone {
   padding: 14px;
-  border-radius: 8px;
-  background: var(--n-color);
-  border: 1px solid var(--n-border-color);
-}
-
-.samples-upload--hidden-trigger :deep(.n-upload-trigger) {
-  display: none;
-}
-
-.camera-queue {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--n-border-color);
-}
-
-.format-tags {
-  margin-bottom: 14px;
-}
-
-.method-cta {
-  align-self: flex-start;
-  margin-top: auto;
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
 }
 
 .samples-upload {
@@ -526,27 +361,18 @@ const cameraHint = computed(() => {
   width: 100%;
 }
 
+.samples-upload--hidden-trigger :deep(.n-upload-trigger) {
+  display: none;
+}
+
 .dragger-inner {
-  padding: 28px 20px;
+  padding: 22px 16px;
   text-align: center;
 }
 
-.dragger-icon {
-  margin-bottom: 8px;
-  color: var(--n-text-color-3);
-}
-
 .dragger-title {
-  margin: 0 0 4px;
-  font-size: 0.95rem;
+  margin: 8px 0 8px;
   font-weight: 500;
-  color: var(--n-text-color-1);
-}
-
-.dragger-hint {
-  margin: 0 0 12px;
-  font-size: 0.8rem;
-  color: var(--n-text-color-3);
 }
 
 .dragger-tags {
@@ -555,29 +381,11 @@ const cameraHint = computed(() => {
 
 .upload-actions {
   display: flex;
-  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  width: 100%;
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid var(--n-border-color);
-}
-
-@media (max-width: 900px) {
-  .samples-grid--split {
-    flex-direction: column;
-  }
-
-  .samples-divider {
-    display: none;
-  }
-
-  .method-panel {
-    margin-bottom: 0;
-  }
-
-  .samples-grid--split .method-panel + .method-panel {
-    margin-top: 12px;
-  }
+  border-top: 1px solid var(--or-line);
 }
 </style>

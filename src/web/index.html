@@ -2,9 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f4f1" />
+    <meta name="application-name" content="OpenRecognition" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="OpenRecognition" />
     <title>OpenRecognition</title>
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Pick the theme before first paint so there is no flash.
+      (function () {
+        try {
+          var mode = localStorage.getItem("or-theme") || "system";
+          var dark =
+            mode === "dark" ||
+            (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          root.dataset.theme = dark ? "dark" : "light";
+          root.style.colorScheme = dark ? "dark" : "light";
+          root.style.background = dark ? "#121110" : "#f5f4f1";
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

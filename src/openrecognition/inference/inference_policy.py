@@ -8,7 +8,7 @@ from openrecognition.inference.session_pool import ModelSessionPool
 
 InferenceBackend = Literal["auto", "onnx", "heuristic"]
 
-# Models that support ONNX in the edge pack (used for status reporting).
+# Slots that can run an ONNX file. The file itself is chosen per category.
 KNOWN_MODELS = (
     "silero_vad",
     "speaker_embedding",
@@ -25,7 +25,7 @@ _IDENTITY_SLOTS = frozenset({"speaker_embedding", "face_embedding", "visual_reid
 class InferencePolicy:
     """Controls whether ONNX sessions are loaded for each model slot.
 
-    - **auto**: use ONNX when ``<model>.onnx`` exists in the active pack (default).
+    - **auto**: use ONNX when the active model's file is on disk (default).
     - **onnx**: prefer ONNX; fall back to heuristics if a file is missing (with a warning).
     - **heuristic**: never load ONNX, even if weights are present (fast dev / compatibility).
     """
@@ -73,16 +73,15 @@ class InferencePolicy:
             return None
         if self.onnx_available(model_name):
             return None
-        pack = self.pool.pack_dir.name
         if self.backend == "onnx":
             return (
                 f"inference_backend is 'onnx' but {model_name}.onnx is missing "
-                f"in pack '{pack}' — using heuristic fallback"
+                "— using heuristic fallback"
             )
         if self.backend == "auto" and model_name in _IDENTITY_SLOTS:
             return (
                 f"inference_backend is 'auto' but {model_name}.onnx is missing "
-                f"in pack '{pack}' — using heuristic fallback"
+                "— using heuristic fallback"
             )
         return None
 

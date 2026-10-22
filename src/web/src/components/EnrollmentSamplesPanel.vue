@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from "vue";
 import {
-  NCard,
   NDataTable,
   NButton,
-  NTag,
   NPopconfirm,
   NSpace,
   NIcon,
@@ -16,7 +14,7 @@ import {
   type PaginationProps,
   type SelectOption,
 } from "naive-ui";
-import { TrashOutline, RefreshOutline, SearchOutline } from "@vicons/ionicons5";
+import { TrashOutline, RefreshOutline } from "@vicons/ionicons5";
 import { api } from "@/api/client";
 import type { EnrollmentOut, SampleOut } from "@/types/api";
 import { ApiError } from "@/api/client";
@@ -26,6 +24,10 @@ import {
   sampleSourceLabels,
 } from "@/utils/sampleLabels";
 import SampleDetailModal from "@/components/SampleDetailModal.vue";
+import FilterBar from "@/components/kit/FilterBar.vue";
+import Chip from "@/components/kit/Chip.vue";
+import TimeAgo from "@/components/kit/TimeAgo.vue";
+import EmptyState from "@/components/EmptyState.vue";
 
 const props = defineProps<{
   enrollmentId: string;
@@ -250,45 +252,51 @@ const columns = computed<DataTableColumns<SampleOut>>(() => [
     ellipsis: { tooltip: true },
     sorter: (a, b) => a.source_label.localeCompare(b.source_label),
     render(row) {
+      const flag = row.flags[0];
+      const flagMeta = flag ? sampleFlagLabels[flag] : null;
       return h("div", { class: "source-cell" }, [
-        h(
-          NTag,
-          { size: "tiny", round: true, bordered: false, type: "info" },
-          () => sampleSourceLabels[row.source] ?? row.source,
-        ),
         h("span", { class: "source-detail" }, row.source_label),
-        row.original_filename
-          ? h("span", { class: "source-file" }, row.original_filename)
-          : null,
-        ...row.flags.map((f) => {
-          const meta = sampleFlagLabels[f];
-          return h(
-            NTag,
-            { size: "tiny", bordered: false, type: meta?.type ?? "default" },
-            () => meta?.label ?? f,
-          );
-        }),
+        h("div", { class: "source-meta" }, [
+          h(Chip, null, { default: () => sampleSourceLabels[row.source] ?? row.source }),
+          flagMeta
+            ? h(
+                Chip,
+                { tone: flagMeta.type === "error" ? "error" : flagMeta.type === "warning" ? "warning" : "default" },
+                { default: () => flagMeta.label },
+              )
+            : null,
+        ]),
       ]);
     },
   },
   {
     title: "Type",
     key: "modality",
-    width: 88,
+    width: 100,
     sorter: (a, b) => a.modality.localeCompare(b.modality),
     render(row) {
-      return h(NTag, { size: "small", bordered: false }, () => modalityLabel(row.modality));
+      const tone = row.modality === "audio" ? "audio" : row.modality === "image" ? "image" : "default";
+      return h(Chip, { tone }, { default: () => modalityLabel(row.modality) });
     },
   },
   {
     title: "Fit",
     key: "centroid_similarity",
-    width: 80,
+    width: 88,
     sorter: (a, b) => (a.centroid_similarity ?? -1) - (b.centroid_similarity ?? -1),
     render(row) {
       const pct = formatFitPct(row.centroid_similarity);
       const low = row.centroid_similarity != null && row.centroid_similarity < 0.5;
       return h("span", { class: low ? "fit-low" : "fit-ok" }, pct);
+    },
+  },
+  {
+    title: "Added",
+    key: "created_at",
+    width: 120,
+    sorter: (a, b) => a.created_at.localeCompare(b.created_at),
+    render(row) {
+      return h(TimeAgo, { value: row.created_at });
     },
   },
   {
@@ -329,64 +337,66 @@ const columns = computed<DataTableColumns<SampleOut>>(() => [
 
 onMounted(load);
 
+watch(
+  () => props.enrollmentId,
+  () => {
+    void load();
+  },
+);
+
 defineExpose({ reload: load });
 </script>
 
 <template>
-  <NCard :bordered="false" class="samples-panel">
-    <template #header>
-      <div class="panel-header">
-        <div>
-          <h2 class="panel-title">Samples</h2>
-          <p class="panel-subtitle">
-            Open a sample to see details, or search to find one.
-          </p>
-        </div>
-        <NButton size="small" quaternary :loading="loading" @click="load">
-          <template #icon>
-            <NIcon><RefreshOutline /></NIcon>
-          </template>
-          Refresh
-        </NButton>
+  <div class="samples-panel">
+    <div class="panel-header">
+      <div>
+        <h2 class="or-heading">Samples</h2>
+        <p class="or-muted or-small" style="margin-top: 4px">
+          What this profile already knows. Open a row for details.
+        </p>
       </div>
-    </template>
+      <NButton size="small" quaternary :loading="loading" @click="load">
+        <template #icon>
+          <NIcon><RefreshOutline /></NIcon>
+        </template>
+        Refresh
+      </NButton>
+    </div>
 
-    <div class="toolbar">
+    <FilterBar :active="hasActiveFilters" @clear="clearFilters">
       <NInput
         v-model:value="searchQuery"
         clearable
+        size="small"
         placeholder="Search samples"
-        class="toolbar-search"
-      >
-        <template #prefix>
-          <NIcon :depth="3"><SearchOutline /></NIcon>
-        </template>
-      </NInput>
+        style="width: min(100%, 220px)"
+      />
       <NSelect
         v-model:value="filterModality"
         :options="modalityOptions"
         placeholder="Type"
         clearable
-        class="toolbar-filter"
+        size="small"
+        style="width: 132px"
       />
       <NSelect
         v-model:value="filterSource"
         :options="sourceOptions"
         placeholder="Source"
         clearable
-        class="toolbar-filter"
+        size="small"
+        style="width: 148px"
       />
       <NSelect
         v-model:value="filterFlag"
         :options="flagOptions"
         placeholder="Flags"
         clearable
-        class="toolbar-filter"
+        size="small"
+        style="width: 160px"
       />
-      <NButton v-if="hasActiveFilters" quaternary size="small" @click="clearFilters">
-        Clear filters
-      </NButton>
-    </div>
+    </FilterBar>
 
     <div v-if="selectionCount > 0" class="bulk-bar">
       <span class="bulk-count">{{ selectionCount }} selected</span>
@@ -406,20 +416,29 @@ defineExpose({ reload: load });
       </NSpace>
     </div>
 
-    <NDataTable
-      v-model:checked-row-keys="checkedRowKeys"
-      v-model:page="page"
-      v-model:page-size="pageSize"
-      :columns="columns"
-      :data="filteredSamples"
-      :loading="loading"
-      :pagination="pagination"
-      :bordered="false"
-      :row-key="(row: SampleOut) => row.id"
-      :row-props="rowProps"
-      size="medium"
-      class="samples-table"
+    <EmptyState
+      v-if="!loading && samples.length === 0"
+      title="No samples yet"
+      description="Add voice, photos, or a clip. They will show up here."
     />
+    <p v-else-if="!loading && filteredSamples.length === 0" class="or-muted" style="text-align: center">
+      Nothing matches.
+    </p>
+    <div v-else class="or-table-wrap">
+      <NDataTable
+        v-model:checked-row-keys="checkedRowKeys"
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        :columns="columns"
+        :data="filteredSamples"
+        :loading="loading"
+        :pagination="pagination"
+        :bordered="false"
+        :row-key="(row: SampleOut) => row.id"
+        :row-props="rowProps"
+        size="medium"
+      />
+    </div>
 
     <SampleDetailModal
       v-model:show="showDetailModal"
@@ -427,19 +446,14 @@ defineExpose({ reload: load });
       :deleting="detailSample != null && deletingId === detailSample.id"
       @delete="deleteFromDetail"
     />
-    <p v-if="!loading && samples.length === 0" class="empty-hint">
-      No samples yet. Use Training data to upload or capture samples.
-    </p>
-    <p v-else-if="!loading && filteredSamples.length === 0" class="empty-hint">
-      No samples match your search or filters.
-      <NButton text type="primary" size="small" @click="clearFilters">Clear filters</NButton>
-    </p>
-  </NCard>
+  </div>
 </template>
 
 <style scoped>
-.samples-panel :deep(.n-card-header) {
-  padding-bottom: 8px;
+.samples-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--or-space-4);
 }
 
 .panel-header {
@@ -447,40 +461,6 @@ defineExpose({ reload: load });
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  flex-wrap: wrap;
-  width: 100%;
-}
-
-.panel-title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-}
-
-.panel-subtitle {
-  margin: 4px 0 0;
-  font-size: 0.82rem;
-  color: var(--n-text-color-3);
-  max-width: 560px;
-  line-height: 1.45;
-}
-
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.toolbar-search {
-  flex: 1;
-  min-width: 200px;
-  max-width: 360px;
-}
-
-.toolbar-filter {
-  width: 160px;
 }
 
 .bulk-bar {
@@ -489,60 +469,44 @@ defineExpose({ reload: load });
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 12px;
   padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(208, 48, 80, 0.08);
-  border: 1px solid rgba(208, 48, 80, 0.25);
+  border-radius: var(--or-radius-md);
+  background: color-mix(in oklab, var(--or-danger, #d03050) 10%, var(--or-surface));
+  border: 1px solid color-mix(in oklab, var(--or-danger, #d03050) 28%, var(--or-line));
 }
 
 .bulk-count {
-  font-size: 0.875rem;
+  font-size: var(--or-text-small);
   font-weight: 500;
-  color: var(--n-text-color-1);
 }
 
 :deep(.source-cell) {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: 6px;
   padding: 2px 0;
-  max-width: 100%;
+  min-width: 0;
 }
 
 :deep(.source-detail) {
-  font-size: 0.8125rem;
   font-weight: 500;
   line-height: 1.35;
-  color: var(--n-text-color-1);
-  word-break: break-word;
+  color: var(--or-text-1);
 }
 
-:deep(.source-file) {
-  font-size: 0.7rem;
-  color: var(--n-text-color-3);
-  font-family: ui-monospace, monospace;
-  word-break: break-all;
+:deep(.source-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .fit-low {
-  color: var(--n-warning-color);
+  color: var(--or-warning, var(--n-warning-color));
   font-weight: 500;
 }
 
 .fit-ok {
-  color: var(--n-text-color-2);
-}
-
-.empty-hint {
-  margin: 12px 0 0;
-  font-size: 0.85rem;
-  color: var(--n-text-color-3);
-  text-align: center;
-}
-
-.samples-table :deep(.n-data-table-tr:hover) {
-  background: color-mix(in srgb, var(--n-primary-color) 6%, transparent);
+  color: var(--or-text-2);
 }
 </style>

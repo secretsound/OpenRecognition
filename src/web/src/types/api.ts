@@ -28,6 +28,7 @@ export interface EnrollmentOut {
   learn_margin?: number;
   learn_daily_cap?: number;
   learn_max_samples?: number;
+  wyoming_min_confidence?: number | null;
   external_ids?: Record<string, string>;
   sample_count: number;
   model_version: string | null;
@@ -35,6 +36,7 @@ export interface EnrollmentOut {
   updated_at: string;
   quality: QualityInfo | null;
   duplicate_warning: string | null;
+  last_seen_at?: string | null;
 }
 
 export interface EnrollmentPatch {
@@ -47,6 +49,7 @@ export interface EnrollmentPatch {
   learn_margin?: number;
   learn_daily_cap?: number;
   learn_max_samples?: number;
+  wyoming_min_confidence?: number | null;
 }
 
 export interface SampleOut {
@@ -66,6 +69,18 @@ export interface SampleOut {
   centroid_similarity: number | null;
   media_stored: boolean;
   flags: string[];
+}
+
+export interface SamplePreviewOut {
+  score: number;
+  verdict: "keep" | "retry" | string;
+  duration_ms: number | null;
+  gate: string | null;
+  reason: string | null;
+  speech: number | null;
+  centroid_similarity: number | null;
+  issues: string[];
+  advice: string;
 }
 
 export interface ApiKeyOut {
@@ -104,8 +119,36 @@ export interface InferenceStatus {
   warnings: string[];
 }
 
+export interface HardwareOut {
+  detected: string;
+  override: string | null;
+  effective: string;
+  label: string;
+  cpu_count: number;
+  memory_mb: number;
+  arch: string;
+}
+
+export interface ThreadsOut {
+  value: number;
+  automatic: number;
+  overridden: boolean;
+}
+
+export interface KnobField {
+  key: string;
+  label: string;
+  kind: "int" | "float";
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  value: number;
+  overridden: boolean;
+}
+
 export interface CapabilitiesOut {
-  pack: string;
+  hardware: HardwareOut;
   version: string;
   recognition_types: string[];
   modalities: string[];
@@ -139,9 +182,13 @@ export interface LoginResponse {
 export interface WebhookSubscriptionOut {
   id: string;
   url: string;
+  name: string;
+  title_template: string;
+  message_template: string;
   events: string[];
   filters: Record<string, unknown>;
   debounce_seconds: number;
+  include_details: boolean;
   created_at: string;
 }
 
@@ -150,6 +197,15 @@ export interface MqttIntegrationOut {
   host: string;
   port: number;
   topic_prefix: string;
+  username: string;
+  password_set: boolean;
+  client_id: string;
+  use_tls: boolean;
+  tls_insecure: boolean;
+  qos: number;
+  retain: boolean;
+  connected: boolean;
+  last_error: string | null;
 }
 
 export interface MqttIntegrationPatch {
@@ -157,6 +213,13 @@ export interface MqttIntegrationPatch {
   host?: string;
   port?: number;
   topic_prefix?: string;
+  username?: string;
+  password?: string;
+  client_id?: string;
+  use_tls?: boolean;
+  tls_insecure?: boolean;
+  qos?: number;
+  retain?: boolean;
 }
 
 export interface DiscoveredWyomingOut {
@@ -194,6 +257,8 @@ export interface WyomingIntegrationOut {
   require_speaker_match: boolean;
   block_on_gate_reject: boolean;
   tag_speaker: boolean;
+  include_confidence: boolean;
+  include_candidates: boolean;
   zeroconf_enabled: boolean;
   zeroconf_name: string;
   advertise_host: string | null;
@@ -223,6 +288,8 @@ export interface WyomingIntegrationPatch {
   require_speaker_match?: boolean;
   block_on_gate_reject?: boolean;
   tag_speaker?: boolean;
+  include_confidence?: boolean;
+  include_candidates?: boolean;
   zeroconf_enabled?: boolean;
   zeroconf_name?: string;
   advertise_host?: string | null;
@@ -258,6 +325,7 @@ export interface AuthMeOut {
   credential_type: string;
   name: string;
   scopes: string[];
+  role?: string | null;
   mcp_tools: McpToolOut[];
   mcp_resources: McpResourceOut[];
 }
@@ -298,7 +366,7 @@ export interface ModelCatalogEntry {
   url: string;
   description: string;
   license: string;
-  packs: string[];
+  license_warning?: boolean;
   on_disk: boolean;
   size_bytes: number | null;
   category: string;
@@ -306,30 +374,28 @@ export interface ModelCatalogEntry {
   label?: string;
   version?: string;
   onnx?: Record<string, string | number | boolean>;
+  contract?: Record<string, string | number | boolean>;
+  knobs?: KnobField[];
   origin?: "builtin" | "custom";
   active?: boolean;
   hardware?: "pi" | "mini" | "desktop";
   hardware_note?: string;
+  fit?: "match" | "lighter" | "heavier";
+  suggested?: boolean;
+  reenroll_count?: number;
+  enrollment_count?: number;
   tier: ModelTier;
   enables: string[];
   depends_on: string[];
   sort_order: number;
 }
 
-export interface ModelRecommendation {
-  id: string;
-  label: string;
-  description: string;
-  sort_order: number;
-  keys: string[];
-}
-
 export interface ModelsStatusOut {
-  pack: string;
-  pack_dir: string;
+  models_dir: string;
+  hardware: HardwareOut;
+  threads: ThreadsOut;
   categories: ModelCategory[];
   presets: ModelPreset[];
-  recommendations?: ModelRecommendation[];
   catalog: ModelCatalogEntry[];
   inference_backend: InferenceBackend;
   loaded_models: Record<string, string>;
@@ -370,12 +436,12 @@ export interface AppSettingsOut {
   default_return_unknown: boolean;
   default_include_sound_events: boolean;
   recognition_log_retention_days: number;
-  pack: string;
+  hardware: HardwareOut;
   auth_required: boolean;
   docs_enabled: boolean;
   web_enabled: boolean;
   data_dir: string;
-  model_packs_dir: string;
+  models_dir: string;
   session_ttl_minutes: number;
   mqtt_enabled: boolean;
   mqtt_host: string;
@@ -406,6 +472,7 @@ export interface AppSettingsPatch {
   recognition_log_retention_days?: number;
   session_ttl_minutes?: number;
   model_idle_unload_minutes?: number;
+  onnx_intra_op_threads?: number | null;
 }
 
 export interface EntityResult {
@@ -423,7 +490,7 @@ export interface EntityResult {
 }
 
 export interface RecognizeMeta {
-  pack: string;
+  hardware: string;
   latency_ms: number;
   request_id: string | null;
   camera_id: string | null;
@@ -525,6 +592,44 @@ export interface RecognitionLogListOut {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface PresenceEntry {
+  enrollment_id: string;
+  label: string;
+  type: string;
+  last_seen_at: string;
+  last_modality: string;
+  last_camera_id: string | null;
+  confidence: number | null;
+}
+
+export interface ConsoleOverviewOut {
+  enrollments: EnrollmentOut[];
+  ready_count: number;
+  attention: EnrollmentOut[];
+  recent_activity: RecognitionLogOut[];
+  last_seen: PresenceEntry | null;
+  models_ready: boolean;
+  wyoming_enabled: boolean;
+  webhook_count: number;
+  has_recognition: boolean;
+  hardware: string;
+  models: Record<string, string>;
+}
+
+export interface ConsoleEvent {
+  type: string;
+  log?: RecognitionLogOut;
+}
+
+export interface JobOut {
+  id: string;
+  status: string;
+  created_at: string;
+  completed_at: string | null;
+  result: RecognizeResponse | null;
+  error: string | null;
 }
 
 export interface ApiErrorBody {

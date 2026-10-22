@@ -1,0 +1,190 @@
+/*
+ * LEGACY helpers still referenced by views that have not been rebuilt yet.
+ * Each rule here is scheduled for deletion once the owning view moves to
+ * the component kit (Phase 7). Do not add new rules to this file.
+ */
+
+:root {
+  --or-page-gap: var(--or-space-6);
+  --or-section-gap: var(--or-space-4);
+  --or-inline-gap: var(--or-space-3);
+  --or-layout-max: var(--or-content-max);
+  --or-modal-max-width: 720px;
+  --or-modal-narrow: 440px;
+  --or-modal-wide: 960px;
+  --or-radius: var(--or-radius-md);
+  --or-modality-audio: var(--or-audio);
+  --or-modality-image: var(--or-image);
+  --or-modality-pet: var(--or-video);
+  --or-modality-object: #8b9bb4;
+}
+
+.app-page-bg {
+  background: var(--or-bg);
+}
+
+.content-container {
+  max-width: var(--or-content-max);
+  margin: 0 auto;
+  padding: var(--or-page-y) var(--or-page-x);
+  width: 100%;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--or-dur) var(--or-ease);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.guided-modal,
+.or-modal {
+  width: min(92vw, var(--or-modal-max-width)) !important;
+  max-width: var(--or-modal-max-width);
+}
+
+.or-modal--narrow {
+  width: min(92vw, var(--or-modal-narrow)) !important;
+  max-width: var(--or-modal-narrow);
+}
+
+.or-modal--wide {
+  width: min(96vw, var(--or-modal-wide)) !important;
+  max-width: var(--or-modal-wide);
+}
+
+.or-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--or-space-3);
+  width: 100%;
+}
+
+.or-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--or-space-4);
+}
+
+.or-choice-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: var(--or-space-4);
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
+  background: var(--or-surface);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color var(--or-dur-fast) var(--or-ease),
+    background var(--or-dur-fast) var(--or-ease);
+}
+
+.or-choice-card:hover {
+  border-color: var(--or-line-strong);
+  background: var(--or-surface-raised);
+}
+
+.or-choice-card.is-selected {
+  border-color: var(--or-accent);
+  box-shadow: inset 0 0 0 1px var(--or-accent);
+  background: var(--or-accent-tint);
+}
+
+.or-choice-card__title {
+  font-size: var(--or-text-body);
+  font-weight: 600;
+}
+
+.or-choice-card__desc {
+  font-size: var(--or-text-small);
+  line-height: var(--or-leading);
+  color: var(--or-text-3);
+}
+
+.or-list-cards {
+  display: none;
+  flex-direction: column;
+  gap: var(--or-space-3);
+}
+
+.or-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
+  background: var(--or-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  width: 100%;
+}
+
+.or-list-card:hover {
+  border-color: var(--or-line-strong);
+}
+
+.or-list-card__title {
+  font-weight: 600;
+}
+
+.or-list-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--or-text-3);
+  font-size: var(--or-text-small);
+}
+
+.or-table-wrap {
+  border: 1px solid var(--or-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--or-surface);
+}
+
+.admin-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--or-space-3);
+  margin-top: var(--or-space-3);
+}
+
+.admin-table-total {
+  font-size: var(--or-text-small);
+  color: var(--or-text-3);
+}
+
+.admin-table-link {
+  color: var(--or-text-1);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.admin-table-link:hover {
+  color: var(--or-accent);
+}
+
+@media (max-width: 899px) {
+  .or-table-desktop {
+    display: none;
+  }
+
+  .or-list-cards {
+    display: flex;
+  }
+}

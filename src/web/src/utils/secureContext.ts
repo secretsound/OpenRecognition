@@ -3,7 +3,7 @@ export function microphoneBlockedMessage(err?: unknown): string {
   if (typeof window !== "undefined" && !window.isSecureContext) {
     return (
       "Microphone requires a secure connection (HTTPS). " +
-      "Use the Vite dev server at https://localhost:5173 (npm run dev in src/web/), " +
+        "Use the Vite dev server at https://localhost:5173 (deno task dev in src/web/), " +
       "or open the app via https://127.0.0.1 — plain http:// on a remote hostname will not work."
     );
   }

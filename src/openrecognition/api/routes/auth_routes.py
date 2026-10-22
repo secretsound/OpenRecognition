@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from openrecognition.api.deps import get_auth, get_state, require_scope
 from openrecognition.api.errors import bad_request, not_found, rate_limited, unauthorized
 from openrecognition.app_state import AppState
+from openrecognition.auth.sessions import role_from_scopes
 from openrecognition.integrator.mcp.scopes import (
     resolve_mcp_resources,
     resolve_mcp_tools,
@@ -102,6 +103,7 @@ def auth_me(auth=Depends(get_auth)):
         credential_type=credential_type,
         name=auth.get("name") or "unknown",
         scopes=scopes,
+        role=auth.get("role") or role_from_scopes(scopes),
         mcp_tools=tools,
         mcp_resources=resources,
     )

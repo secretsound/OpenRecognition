@@ -17,6 +17,8 @@ def wyoming_settings_out(state: AppState) -> dict:
         "require_speaker_match": s.wyoming_require_speaker_match,
         "block_on_gate_reject": s.wyoming_block_on_gate_reject,
         "tag_speaker": s.wyoming_tag_speaker,
+        "include_confidence": s.wyoming_include_confidence,
+        "include_candidates": s.wyoming_include_candidates,
         "zeroconf_enabled": s.wyoming_zeroconf_enabled,
         "zeroconf_name": s.wyoming_zeroconf_name,
         "advertise_host": s.wyoming_advertise_host or None,
@@ -32,17 +34,24 @@ def wyoming_settings_out(state: AppState) -> dict:
     }
 
 
-def apply_wyoming_patch(state: AppState, body: WyomingIntegrationPatch) -> None:
+def apply_wyoming_patch(state: AppState, body: WyomingIntegrationPatch) -> bool:
+    """Persist Wyoming settings. Return True when the listener must restart."""
     s = state.settings
+    restart = False
+
     if body.enabled is not None:
+        restart = restart or body.enabled != s.wyoming_enabled
         s.wyoming_enabled = body.enabled
     if body.uri is not None:
-        s.wyoming_uri = body.uri.strip()
+        uri = body.uri.strip()
+        restart = restart or uri != s.wyoming_uri
+        s.wyoming_uri = uri
     if body.upstream_uri is not None:
-        s.wyoming_upstream_uri = body.upstream_uri.strip()
+        upstream = body.upstream_uri.strip()
+        restart = restart or upstream != s.wyoming_upstream_uri
+        s.wyoming_upstream_uri = upstream
     if body.home_assistant_url is not None:
-        url = body.home_assistant_url.strip()
-        s.wyoming_home_assistant_url = url
+        s.wyoming_home_assistant_url = body.home_assistant_url.strip()
     if body.min_confidence is not None:
         s.wyoming_min_confidence = body.min_confidence
     if body.require_speaker_match is not None:
@@ -51,12 +60,21 @@ def apply_wyoming_patch(state: AppState, body: WyomingIntegrationPatch) -> None:
         s.wyoming_block_on_gate_reject = body.block_on_gate_reject
     if body.tag_speaker is not None:
         s.wyoming_tag_speaker = body.tag_speaker
+    if body.include_confidence is not None:
+        s.wyoming_include_confidence = body.include_confidence
+    if body.include_candidates is not None:
+        s.wyoming_include_candidates = body.include_candidates
     if body.zeroconf_enabled is not None:
+        restart = restart or body.zeroconf_enabled != s.wyoming_zeroconf_enabled
         s.wyoming_zeroconf_enabled = body.zeroconf_enabled
     if body.zeroconf_name is not None:
-        s.wyoming_zeroconf_name = body.zeroconf_name.strip()
+        name = body.zeroconf_name.strip()
+        restart = restart or name != s.wyoming_zeroconf_name
+        s.wyoming_zeroconf_name = name
     if body.advertise_host is not None:
-        s.wyoming_advertise_host = body.advertise_host.strip()
+        host = body.advertise_host.strip()
+        restart = restart or host != s.wyoming_advertise_host
+        s.wyoming_advertise_host = host
 
     state.wyoming.configure(
         enabled=s.wyoming_enabled,
@@ -66,8 +84,11 @@ def apply_wyoming_patch(state: AppState, body: WyomingIntegrationPatch) -> None:
         require_speaker_match=s.wyoming_require_speaker_match,
         block_on_gate_reject=s.wyoming_block_on_gate_reject,
         tag_speaker=s.wyoming_tag_speaker,
+        include_confidence=s.wyoming_include_confidence,
+        include_candidates=s.wyoming_include_candidates,
         zeroconf_enabled=s.wyoming_zeroconf_enabled,
         zeroconf_name=s.wyoming_zeroconf_name,
         advertise_host=s.wyoming_advertise_host,
     )
     state.persist_runtime()
+    return restart

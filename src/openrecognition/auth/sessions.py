@@ -48,6 +48,16 @@ ROLE_SCOPES = {
 }
 
 
+def role_from_scopes(scopes: list[str] | None) -> str:
+    """Map API-key or session scopes to the same roles the console uses."""
+    have = set(scopes or [])
+    if "admin" in have:
+        return "admin"
+    if "enroll" in have or "recognize" in have:
+        return "operator"
+    return "viewer"
+
+
 class SessionService:
     def __init__(self, db: Database, ttl_minutes: int = 60):
         self.db = db

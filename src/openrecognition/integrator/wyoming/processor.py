@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from openrecognition.gallery.match import wyoming_threshold
 from openrecognition.integrator.wyoming.wav_util import pcm_to_wav
 
 if TYPE_CHECKING:
@@ -34,12 +35,16 @@ def _candidate_rows(candidates: list[dict[str, Any]], *, min_confidence: float) 
     for item in candidates:
         confidence = float(item.get("confidence") or 0.0)
         label = item.get("label") or "unknown"
+        if "accepted" in item:
+            accepted = bool(item["accepted"]) and label not in ("unknown", "")
+        else:
+            accepted = label not in ("unknown", "") and confidence >= min_confidence
         rows.append(
             {
                 "label": label,
                 "entity_id": item.get("entity_id"),
                 "confidence": confidence,
-                "accepted": label not in ("unknown", "") and confidence >= min_confidence,
+                "accepted": accepted,
             }
         )
     return rows
@@ -60,10 +65,9 @@ def _speaker_match(
             reason="speaker_disabled",
         )
 
-    gallery = state.gallery.get_embeddings_for_match(
-        modality="audio",
-        model_version=state.speaker.current_model_version(),
-    )
+    from openrecognition.inference.alternates import speaker_alternates
+
+    gallery = state.gallery.get_embeddings_for_match(modality="audio")
     gallery_count = len(gallery)
     if not gallery:
         return UtteranceResult(
@@ -77,20 +81,20 @@ def _speaker_match(
             candidates=[],
         )
 
-    vec = state.speaker.embed(wav)
-    comparable = [
-        item
-        for item in gallery
-        if item.get("type") in ("person", "sound") and item["vector"].size == vec.size
-    ]
-    candidates = state.speaker.match_candidates(vec, gallery, min_confidence, top_k=5)
-    candidate_rows = _candidate_rows(candidates, min_confidence=min_confidence)
-    matches = state.speaker.match_gallery(
-        vec,
+    outcome = state.speaker.match_retained(
+        wav,
         gallery,
         min_confidence,
-        return_unknown=True,
+        True,
+        alternates=speaker_alternates(state, gallery),
+        threshold_fn=wyoming_threshold,
+        top_k=5,
     )
+    vec = outcome["vector"]
+    comparable_count = int(outcome["comparable"])
+    candidates = outcome["candidates"]
+    candidate_rows = _candidate_rows(candidates, min_confidence=min_confidence)
+    matches = outcome["matches"]
 
     base = {
         "gate": gate,
@@ -98,8 +102,8 @@ def _speaker_match(
         "min_confidence": min_confidence,
         "speaker_match_attempted": True,
         "gallery_count": gallery_count,
-        "comparable_speaker_count": len(comparable),
-        "speaker_model_version": state.speaker.model_version,
+        "comparable_speaker_count": comparable_count,
+        "speaker_model_version": outcome["model_version"] or state.speaker.model_version,
     }
 
     if gate != "accept":
@@ -116,9 +120,20 @@ def _speaker_match(
     label = top.get("label")
     confidence = float(top.get("confidence") or 0.0)
     unknown = label in (None, "", "unknown")
-    accepted = not unknown and confidence >= min_confidence
+    used = top.get("threshold_used")
+    accepted = not unknown
+    if accepted and used is not None:
+        accepted = confidence >= float(used)
     enrollment_id = top.get("entity_id")
-    if accepted and enrollment_id and top.get("type") == "person":
+    if used is not None:
+        base["min_confidence"] = float(used)
+    if (
+        accepted
+        and enrollment_id
+        and top.get("type") == "person"
+        and vec is not None
+        and outcome["model_version"] == state.speaker.current_model_version()
+    ):
         from openrecognition.gallery.learn import maybe_learn_voice
 
         maybe_learn_voice(

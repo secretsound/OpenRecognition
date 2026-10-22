@@ -7,6 +7,12 @@ const model = defineModel<File | null>({ default: null });
 
 const clipperRef = ref<InstanceType<typeof VideoClipper> | null>(null);
 
+function unwrapNum(value: number | { value: number } | undefined): number {
+  if (typeof value === "number") return value;
+  if (value && typeof value === "object" && "value" in value) return value.value;
+  return 0;
+}
+
 function getModality(): VideoModalityChoice {
   const exposed = clipperRef.value;
   if (!exposed) return "both";
@@ -16,7 +22,11 @@ function getModality(): VideoModalityChoice {
   return "both";
 }
 
-defineExpose({ getModality });
+function getClipDuration(): number {
+  return unwrapNum(clipperRef.value?.clipDurationSec as number | { value: number } | undefined);
+}
+
+defineExpose({ getModality, getClipDuration });
 </script>
 
 <template>

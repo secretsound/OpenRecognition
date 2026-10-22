@@ -23,6 +23,10 @@ def _row_get(row, key: str, default=None):
     return row[key] if key in row.keys() else default
 
 
+def _optional_float(value):
+    return float(value) if value is not None else None
+
+
 ModelVersionResolver = Callable[[str, str], str]
 
 
@@ -78,13 +82,25 @@ class GalleryStore:
             return None
         return self._row_to_enrollment(row)
 
-    def list_enrollments(self, etype: str | None = None) -> list[dict[str, Any]]:
+    def list_enrollments(
+        self, etype: str | None = None, q: str | None = None
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
         if etype:
-            rows = self.db.fetchall(
-                "SELECT * FROM enrollments WHERE type = ? ORDER BY label", (etype,)
+            clauses.append("type = ?")
+            params.append(etype)
+        needle = (q or "").strip()
+        if needle:
+            clauses.append("label LIKE ? ESCAPE '\\'")
+            escaped = (
+                needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             )
-        else:
-            rows = self.db.fetchall("SELECT * FROM enrollments ORDER BY label")
+            params.append(f"%{escaped}%")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.db.fetchall(
+            f"SELECT * FROM enrollments{where} ORDER BY label", tuple(params)
+        )
         return [self._row_to_enrollment(r) for r in rows]
 
     def _row_to_enrollment(self, row) -> dict[str, Any]:
@@ -113,6 +129,7 @@ class GalleryStore:
             "learn_margin": float(_row_get(row, "learn_margin", 0.05) or 0.0),
             "learn_daily_cap": int(_row_get(row, "learn_daily_cap", 8) or 0),
             "learn_max_samples": int(_row_get(row, "learn_max_samples", 20) or 1),
+            "wyoming_min_confidence": _optional_float(_row_get(row, "wyoming_min_confidence", None)),
             "model_version": row["model_version"],
             "external_ids": external_ids,
             "sample_count": samples["c"] if samples else 0,
@@ -135,6 +152,12 @@ class GalleryStore:
             else:
                 fields.append("threshold = ?")
                 params.append(kwargs["threshold"])
+        if "wyoming_min_confidence" in kwargs:
+            if kwargs["wyoming_min_confidence"] is None:
+                fields.append("wyoming_min_confidence = NULL")
+            else:
+                fields.append("wyoming_min_confidence = ?")
+                params.append(kwargs["wyoming_min_confidence"])
         if "enabled" in kwargs and kwargs["enabled"] is not None:
             fields.append("enabled = ?")
             params.append(1 if kwargs["enabled"] else 0)
@@ -309,6 +332,7 @@ class GalleryStore:
                         "label": row["label"],
                         "type": etype,
                         "threshold": row["threshold"],
+                        "wyoming_min_confidence": _row_get(row, "wyoming_min_confidence", None),
                         "model_version": mv,
                         "vector": vec,
                         "modality": group_modality,
@@ -393,6 +417,17 @@ class GalleryStore:
             return None
         vectors = [match.bytes_to_vector(r["vector"], r["dim"]) for r in rows]
         return match.robust_centroid(vectors)
+
+    def similarity_to_centroid(
+        self,
+        enrollment_id: str,
+        vector: np.ndarray,
+        model_version: str,
+    ) -> float | None:
+        centroid = self._centroid_for_model_version(enrollment_id, model_version)
+        if centroid is None:
+            return None
+        return match.cosine_similarity(centroid, vector)
 
     def list_samples(self, enrollment_id: str) -> list[SampleOut]:
         en = self.get_enrollment(enrollment_id)
@@ -527,6 +562,14 @@ class GalleryStore:
             return ["audio"]
         return ["audio"]
 
+    def _quality_target(self, enrollment_type: str, modality: str) -> int:
+        """Samples needed before a consistent embedding can score near 100%."""
+        if modality == "audio":
+            return 8
+        if enrollment_type == "pet":
+            return 10
+        return 6
+
     def _evaluate_vectors(
         self,
         vectors: list[np.ndarray],
@@ -545,20 +588,19 @@ class GalleryStore:
         avg = float(np.mean(sims))
         if avg < 0.5:
             issues.append("high_variance")
-        if enrollment_type == "pet" and modality == "image" and n < 10:
-            issues.append("pet_recommend_more_samples")
-        score = min(1.0, avg * (n / 10.0))
+        target = self._quality_target(enrollment_type, modality)
+        if n < target:
+            if modality == "audio":
+                issues.append("recommend_more_voice_samples")
+            elif enrollment_type == "pet" and modality == "image":
+                issues.append("pet_recommend_more_samples")
+            elif modality == "image":
+                issues.append("recommend_more_samples")
+        score = min(1.0, avg * (n / float(target)))
         usable = n >= 1 and ("too_few_samples" not in issues or n >= 3)
         return QualityInfo(score=round(score, 3), issues=issues, usable=usable)
 
-    def evaluate_enrollment(self, eid: str) -> QualityInfo:
-        rows = self.db.fetchall(
-            "SELECT vector, dim, modality, model_version FROM embeddings WHERE enrollment_id = ?",
-            (eid,),
-        )
-        en = self.get_enrollment(eid)
-        enrollment_type = en["type"] if en else "person"
-
+    def _evaluate_from_rows(self, enrollment_type: str, rows: list[Any]) -> QualityInfo:
         by_modality: dict[str, list[np.ndarray]] = {}
         for row in rows:
             mod = row["modality"]
@@ -636,6 +678,34 @@ class GalleryStore:
             usable=any_usable,
             modalities=modality_results,
         )
+
+    def evaluate_enrollment(self, eid: str) -> QualityInfo:
+        rows = self.db.fetchall(
+            "SELECT vector, dim, modality, model_version FROM embeddings WHERE enrollment_id = ?",
+            (eid,),
+        )
+        en = self.get_enrollment(eid)
+        enrollment_type = en["type"] if en else "person"
+        return self._evaluate_from_rows(enrollment_type, rows)
+
+    def evaluate_many(self, enrollments: list[dict[str, Any]]) -> dict[str, QualityInfo]:
+        """Score every enrollment with one embeddings query. Used by the library list."""
+        if not enrollments:
+            return {}
+        ids = [e["id"] for e in enrollments]
+        placeholders = ",".join("?" * len(ids))
+        rows = self.db.fetchall(
+            f"SELECT enrollment_id, vector, dim, modality, model_version "
+            f"FROM embeddings WHERE enrollment_id IN ({placeholders})",
+            ids,
+        )
+        by_id: dict[str, list[Any]] = {eid: [] for eid in ids}
+        for row in rows:
+            by_id.setdefault(row["enrollment_id"], []).append(row)
+        return {
+            en["id"]: self._evaluate_from_rows(en["type"], by_id.get(en["id"], []))
+            for en in enrollments
+        }
 
     def export_gallery(self) -> dict[str, Any]:
         enrollments = []
@@ -719,3 +789,13 @@ class GalleryStore:
     def list_presence(self) -> list[dict[str, Any]]:
         rows = self.db.fetchall("SELECT * FROM presence ORDER BY last_seen_at DESC")
         return [dict(r) for r in rows]
+
+    def last_seen_at(self, enrollment_id: str) -> str | None:
+        row = self.db.fetchone(
+            "SELECT last_seen_at FROM presence WHERE enrollment_id = ?",
+            (enrollment_id,),
+        )
+        return row["last_seen_at"] if row else None
+
+    def presence_map(self) -> dict[str, str]:
+        return {r["enrollment_id"]: r["last_seen_at"] for r in self.list_presence()}

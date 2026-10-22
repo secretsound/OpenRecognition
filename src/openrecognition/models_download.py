@@ -1,4 +1,4 @@
-"""Download ONNX model weights into model-packs/<pack>/."""
+"""Download ONNX weights into the models directory."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ CategoryId = Literal[
 ]
 TierKind = Literal["essential", "recommended", "optional"]
 HardwareKind = Literal["pi", "mini", "desktop"]
+KnobKind = Literal["int", "float"]
 
 
 @dataclass(frozen=True)
@@ -38,9 +39,23 @@ class ModelDownloadPreset:
     id: str
     label: str
     description: str
-    keys: tuple[str, ...]
+    keys: tuple[str, ...] = ()
+    categories: tuple[str, ...] = ()
     tier: TierKind = "recommended"
     sort_order: int = 0
+
+
+@dataclass(frozen=True)
+class KnobField:
+    """A setting the operator can change. The contract of the file stays fixed."""
+
+    key: str
+    label: str
+    kind: KnobKind
+    min: float
+    max: float
+    step: float
+    default: float
 
 
 @dataclass(frozen=True)
@@ -122,7 +137,7 @@ DOWNLOAD_PRESETS: tuple[ModelDownloadPreset, ...] = (
         id="voice",
         label="Voice & speaker ID",
         description="Best for Assist / voice pipelines: gate speech, then identify who is speaking.",
-        keys=("silero_vad", "speaker_embedding"),
+        categories=("speech_check", "voice_match"),
         tier="essential",
         sort_order=1,
     ),
@@ -130,10 +145,10 @@ DOWNLOAD_PRESETS: tuple[ModelDownloadPreset, ...] = (
         id="voice_enhanced",
         label="Voice + gate reasons",
         description=(
-            "Silero speech gate plus YAMNet for clearer reject reasons "
+            "Speech gate, speaker match, and clearer reject reasons "
             "(music, silence, background noise)."
         ),
-        keys=("silero_vad", "speaker_embedding", "audio_gate_classifier"),
+        categories=("speech_check", "voice_match", "skip_reasons"),
         tier="recommended",
         sort_order=2,
     ),
@@ -141,32 +156,24 @@ DOWNLOAD_PRESETS: tuple[ModelDownloadPreset, ...] = (
         id="face",
         label="Face recognition",
         description="Identify people from enrollment photos and camera snapshots.",
-        keys=("face_detector", "face_embedding"),
+        categories=("find_face", "match_face"),
         tier="recommended",
         sort_order=3,
     ),
     ModelDownloadPreset(
         id="pets",
         label="Pets & objects",
-        description="Recognize enrolled pets or objects; needs both detector and visual model.",
-        keys=("animal_detector", "visual_reid"),
+        description="Recognize enrolled pets or objects. Needs a detector and a visual model.",
+        categories=("find_pet", "match_pet"),
         tier="recommended",
         sort_order=4,
     ),
     ModelDownloadPreset(
         id="full",
-        label="Full multimodal",
-        description="Voice, faces, pets, and objects. About 65 MB.",
-        keys=(
-            "silero_vad",
-            "speaker_embedding",
-            "audio_gate_classifier",
-            "face_detector",
-            "face_embedding",
-            "animal_detector",
-            "visual_reid",
-        ),
-        tier="optional",
+        label="Suggested for this machine",
+        description="The model suggested in every category for the hardware you are on.",
+        categories=tuple(category.id for category in MODEL_CATEGORIES),
+        tier="recommended",
         sort_order=5,
     ),
 )
@@ -192,6 +199,34 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         sort_order=1,
     ),
     ModelDownloadSpec(
+        key="speaker_campplus",
+        url=(
+            "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/"
+            "resolve/main/voxceleb_CAM++.onnx"
+        ),
+        description="WeSpeaker CAM++ — 512-dim speaker embeddings, about a quarter of the compute (~28 MB)",
+        source="huggingface",
+        license="Apache-2.0 (WeSpeaker)",
+        filename="speaker_campplus.onnx",
+        category="voice_match",
+        use_for="Recognizes who is speaking.",
+        label="WeSpeaker CAM++",
+        hardware="pi",
+        hardware_note="The one to start with on a Raspberry Pi. Short Assist clips are its strength.",
+        version="wespeaker-campplus-voxceleb-v1",
+        onnx={
+            "preprocessor": "wespeaker_fbank",
+            "sample_rate": 16000,
+            "num_mel_bins": 80,
+            "max_seconds": 15,
+            "embed_dim": 512,
+        },
+        tier="recommended",
+        enables=("Voice enrollments", "Recognize → audio", "Wyoming speaker match"),
+        depends_on=("silero_vad",),
+        sort_order=1,
+    ),
+    ModelDownloadSpec(
         key="speaker_embedding",
         url=(
             "https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34/"
@@ -203,8 +238,8 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         category="voice_match",
         use_for="Recognizes who is speaking.",
         label="WeSpeaker ResNet34",
-        hardware="pi",
-        hardware_note="Fine on a Raspberry Pi. A mini PC is easier when several people talk.",
+        hardware="mini",
+        hardware_note="A steady default on a mini PC. Heavier than CAM++ and a bit more accurate.",
         version="wespeaker-resnet34-v1",
         onnx={
             "preprocessor": "wespeaker_fbank",
@@ -217,6 +252,34 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         enables=("Voice enrollments", "Recognize → audio", "Wyoming speaker match"),
         depends_on=("silero_vad",),
         sort_order=2,
+    ),
+    ModelDownloadSpec(
+        key="speaker_resnet293",
+        url=(
+            "https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet293-LM/"
+            "resolve/main/voxceleb_resnet293_LM.onnx"
+        ),
+        description="WeSpeaker ResNet293 large-margin — 256-dim speaker embeddings (~109 MB)",
+        source="huggingface",
+        license="Apache-2.0 (WeSpeaker)",
+        filename="speaker_resnet293.onnx",
+        category="voice_match",
+        use_for="Recognizes who is speaking.",
+        label="WeSpeaker ResNet293",
+        hardware="desktop",
+        hardware_note="Best of this set on a desktop. Large-margin training favors clips longer than a few seconds.",
+        version="wespeaker-resnet293-lm-v1",
+        onnx={
+            "preprocessor": "wespeaker_fbank",
+            "sample_rate": 16000,
+            "num_mel_bins": 80,
+            "max_seconds": 15,
+            "embed_dim": 256,
+        },
+        tier="optional",
+        enables=("Voice enrollments", "Recognize → audio", "Wyoming speaker match"),
+        depends_on=("silero_vad",),
+        sort_order=3,
     ),
     ModelDownloadSpec(
         key="audio_gate_classifier",
@@ -247,7 +310,7 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         ),
         description="SCRFD-500M — lightweight face detection (~2.4 MB)",
         source="github",
-        license="MIT (InsightFace / SCRFD)",
+        license="Non-commercial research (InsightFace)",
         filename="face_detector.onnx",
         category="find_face",
         use_for="Finds faces in a photo.",
@@ -256,7 +319,7 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         version="scrfd-500m",
         onnx={"input_size": 640, "conf_thres": 0.5},
         tier="recommended",
-        enables=("Accurate face crops before embedding"),
+        enables=("Accurate face crops before embedding",),
         sort_order=1,
     ),
     ModelDownloadSpec(
@@ -267,18 +330,41 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         ),
         description="MobileFace (w600k_mbf) — 512-dim face embeddings (~13 MB)",
         source="github",
-        license="Apache-2.0 (InsightFace)",
+        license="Non-commercial research (InsightFace)",
         filename="face_embedding.onnx",
         category="match_face",
         use_for="Matches a face to someone in the library.",
         label="MobileFace",
         hardware="pi",
+        hardware_note="Right size for a Raspberry Pi. A mini PC can step up to ResNet50.",
         version="w600k-mbf-v1",
         onnx={"input_size": 112, "embed_dim": 512, "input_norm": "insightface"},
         tier="essential",
         enables=("Person enrollments with photos", "Recognize → image (face)"),
         depends_on=("face_detector",),
         sort_order=2,
+    ),
+    ModelDownloadSpec(
+        key="face_w600k_r50",
+        url=(
+            "https://github.com/yakhyo/face-reidentification/releases/download/"
+            "v0.0.1/w600k_r50.onnx"
+        ),
+        description="ResNet50 (w600k_r50) — 512-dim face embeddings (~166 MB)",
+        source="github",
+        license="Non-commercial research (InsightFace)",
+        filename="face_w600k_r50.onnx",
+        category="match_face",
+        use_for="Matches a face to someone in the library.",
+        label="ResNet50",
+        hardware="mini",
+        hardware_note="Clearer on profile photos and age gaps. Too heavy for a Pi.",
+        version="w600k-r50-v1",
+        onnx={"input_size": 112, "embed_dim": 512, "input_norm": "insightface"},
+        tier="recommended",
+        enables=("Person enrollments with photos", "Recognize → image (face)"),
+        depends_on=("face_detector",),
+        sort_order=3,
     ),
     ModelDownloadSpec(
         key="animal_detector",
@@ -297,7 +383,7 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
         version="yolo11n",
         onnx={"input_size": 640, "conf_thres": 0.25},
         tier="recommended",
-        enables=("Pet/object region crops (not full-frame guess)"),
+        enables=("Pet/object region crops (not full-frame guess)",),
         sort_order=1,
     ),
     ModelDownloadSpec(
@@ -330,6 +416,61 @@ MODEL_CATALOG: tuple[ModelDownloadSpec, ...] = (
 
 _CATALOG_BY_KEY = {m.key: m for m in MODEL_CATALOG}
 
+# Keys an operator may change. Everything else in ``onnx`` is the file's contract.
+KNOB_FIELDS: dict[str, tuple[KnobField, ...]] = {
+    "speech_check": (
+        KnobField("speech_threshold", "Speech threshold", "float", 0.05, 0.95, 0.01, 0.28),
+    ),
+    "voice_match": (
+        KnobField("max_seconds", "Max length (seconds)", "float", 1, 60, 1, 15),
+    ),
+    "find_face": (
+        KnobField("conf_thres", "Minimum score", "float", 0.05, 0.95, 0.05, 0.5),
+    ),
+    "find_pet": (
+        KnobField("conf_thres", "Minimum score", "float", 0.05, 0.95, 0.05, 0.25),
+    ),
+}
+
+
+def knob_fields(category: str) -> tuple[KnobField, ...]:
+    return KNOB_FIELDS.get(category, ())
+
+
+def split_settings(category: str, raw: dict | None) -> tuple[dict, dict]:
+    """Separate the file contract from the knobs, filling any knob the model omitted."""
+    fields = {field.key: field for field in knob_fields(category)}
+    source = raw or {}
+    contract: dict = {}
+    knobs: dict = {}
+    for key, value in source.items():
+        if key in fields:
+            knobs[key] = value
+        else:
+            contract[key] = value
+    for key, field in fields.items():
+        knobs.setdefault(key, field.default)
+    return contract, knobs
+
+
+def license_needs_confirm(license_name: str) -> bool:
+    text = license_name.lower()
+    return "agpl" in text or "non-commercial" in text
+
+
+def resolve_weight(filename: str, directories: list[Path]) -> Path | None:
+    """Find a downloaded file. New files live in the models directory; older packs still count."""
+    seen: set[str] = set()
+    for directory in directories:
+        key = str(directory)
+        if key in seen:
+            continue
+        seen.add(key)
+        path = directory / filename
+        if path.is_file():
+            return path
+    return None
+
 
 def runtime_version(key: str) -> str | None:
     spec = _CATALOG_BY_KEY.get(key)
@@ -339,11 +480,12 @@ def runtime_version(key: str) -> str | None:
 
 
 def runtime_settings(key: str) -> dict[str, Any]:
-    """How to run a downloaded file. Empty when the key is not in the catalog."""
+    """Contract plus knob defaults. Empty when the key is not in the catalog."""
     spec = _CATALOG_BY_KEY.get(key)
     if spec is None:
         return {}
-    return dict(spec.onnx)
+    contract, knobs = split_settings(spec.category, spec.onnx)
+    return {**contract, **knobs}
 
 
 def runtime_filename(key: str) -> str:
@@ -369,12 +511,21 @@ def list_categories() -> list[dict]:
     ]
 
 
-def list_presets(*, pack: str | None = None) -> list[dict]:
-    """Download bundles filtered to keys available in the pack."""
-    available = {m.key for m in (catalog_for_pack(pack) if pack else MODEL_CATALOG)}
+def list_presets(suggested: dict[str, str] | None = None) -> list[dict]:
+    """Bundles of the model suggested for each category. Falls back to the built-in default."""
+    from openrecognition.model_slots import CATEGORY_SLOT
+
+    chosen = suggested or {}
     out: list[dict] = []
     for preset in sorted(DOWNLOAD_PRESETS, key=lambda x: x.sort_order):
-        keys = tuple(k for k in preset.keys if k in available)
+        if preset.categories:
+            keys = [
+                chosen.get(category) or CATEGORY_SLOT.get(category, "")
+                for category in preset.categories
+            ]
+            keys = [key for key in keys if key]
+        else:
+            keys = [key for key in preset.keys if key in _CATALOG_BY_KEY]
         if not keys:
             continue
         out.append(
@@ -382,12 +533,19 @@ def list_presets(*, pack: str | None = None) -> list[dict]:
                 "id": preset.id,
                 "label": preset.label,
                 "description": preset.description,
-                "keys": list(keys),
+                "keys": keys,
                 "tier": preset.tier,
                 "sort_order": preset.sort_order,
             }
         )
     return out
+
+
+def _text_list(value: str | tuple | list) -> list[str]:
+    """A one-item sequence written without a trailing comma is a string."""
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in value]
 
 
 def _spec_to_row(s: ModelDownloadSpec) -> dict:
@@ -408,15 +566,16 @@ def _spec_to_row(s: ModelDownloadSpec) -> dict:
         "hardware": s.hardware,
         "hardware_note": s.hardware_note,
         "tier": s.tier,
-        "enables": list(s.enables),
-        "depends_on": list(s.depends_on),
+        "enables": _text_list(s.enables),
+        "depends_on": _text_list(s.depends_on),
         "sort_order": s.sort_order,
     }
 
 
 def list_catalog(*, pack: str | None = None) -> list[dict]:
-    """Human-readable catalog for CLI / API."""
-    specs = catalog_for_pack(pack) if pack else list(MODEL_CATALOG)
+    """Human-readable catalog for CLI / API. ``pack`` is ignored."""
+    del pack
+    specs = list(MODEL_CATALOG)
     return [_spec_to_row(s) for s in sorted(specs, key=lambda x: (x.category, x.sort_order, x.key))]
 
 
@@ -485,108 +644,59 @@ def download_model(
     }
 
 
-def models_status(
-    pack_dir: Path,
-    *,
-    inference: dict | None = None,
-    extra_specs: list[ModelDownloadSpec] | None = None,
-    active: dict[str, str] | None = None,
-) -> dict:
-    """Catalog plus on-disk state for admin UI / API."""
-    from openrecognition.model_slots import CATEGORY_SLOT
-
-    pack_name = pack_dir.name
-    catalog_rows = list_catalog(pack=pack_name)
-    for row in catalog_rows:
-        row["origin"] = "builtin"
-    for spec in extra_specs or []:
-        row = _spec_to_row(spec)
-        row["origin"] = "custom"
-        catalog_rows.append(row)
-    order = {c.id: c.sort_order for c in MODEL_CATEGORIES}
-    catalog_rows.sort(key=lambda r: (order.get(r["category"], 99), r["sort_order"], r["key"]))
-    chosen = active or {}
-    catalog: list[dict] = []
-    for row in catalog_rows:
-        path = pack_dir / row["filename"]
-        on_disk = path.exists()
-        default_key = CATEGORY_SLOT.get(row["category"])
-        is_active = chosen.get(row["category"], default_key) == row["key"]
-        entry = {**row, "on_disk": on_disk, "size_bytes": None, "active": is_active}
-        if on_disk:
-            entry["size_bytes"] = path.stat().st_size
-        catalog.append(entry)
-    on_disk_keys = {row["key"] for row in catalog if row["on_disk"]}
-    presets = []
-    for preset in list_presets(pack=pack_name):
-        keys = preset["keys"]
-        missing = [k for k in keys if k not in on_disk_keys]
-        presets.append(
-            {
-                **preset,
-                "complete": len(missing) == 0,
-                "missing_keys": missing,
-            }
-        )
-    return {
-        "pack": pack_name,
-        "pack_dir": str(pack_dir),
-        "categories": list_categories(),
-        "presets": presets,
-        "catalog": catalog,
-        "inference": inference,
-    }
-
-
 def delete_model_file(
-    pack_dir: Path,
+    model_dir: Path,
     key: str,
     *,
     extra_specs: list[ModelDownloadSpec] | None = None,
+    search_dirs: list[Path] | None = None,
 ) -> dict:
     extra = {spec.key: spec for spec in extra_specs or []}
     spec = extra.get(key) or _CATALOG_BY_KEY.get(key)
     if spec is None:
         raise ValueError(f"Unknown model key: {key}")
-    if key not in extra and pack_dir.name not in spec.packs:
-        raise ValueError(f"Model '{key}' is not in pack '{pack_dir.name}'")
-    path = pack_dir / spec.onnx_filename
-    if not path.exists():
+    directories = search_dirs or [model_dir]
+    removed: list[str] = []
+    seen: set[str] = set()
+    for directory in directories:
+        marker = str(directory)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        path = directory / spec.onnx_filename
+        if path.is_file():
+            path.unlink()
+            removed.append(path.name)
+    if not removed:
         return {"key": key, "status": "missing", "message": "file not on disk"}
-    path.unlink()
-    return {"key": key, "status": "deleted", "message": f"removed {path.name}"}
+    return {"key": key, "status": "deleted", "message": f"removed {spec.onnx_filename}"}
 
 
 def download_models(
-    pack_dir: Path,
+    model_dir: Path,
     *,
     keys: list[str] | None = None,
     force: bool = False,
     extra_specs: list[ModelDownloadSpec] | None = None,
 ) -> list[dict]:
-    """Download models into pack_dir. Default: all catalog entries for this pack name."""
-    pack_name = pack_dir.name
-    available = catalog_for_pack(pack_name)
+    """Download models into model_dir. Default: the whole catalog."""
     extra = {spec.key: spec for spec in extra_specs or []}
-    if not available and not extra:
-        raise ValueError(f"No catalog entries for pack '{pack_name}'")
-
     if keys:
         specs: list[ModelDownloadSpec] = []
         for key in keys:
             spec = extra.get(key) or _CATALOG_BY_KEY.get(key)
             if spec is None:
                 raise ValueError(f"Unknown model key: {key}")
-            if key not in extra and pack_name not in spec.packs:
-                raise ValueError(f"Model '{key}' is not used in pack '{pack_name}'")
             specs.append(spec)
     else:
-        specs = [*available, *extra.values()]
+        specs = [*MODEL_CATALOG, *extra.values()]
+    if not specs:
+        raise ValueError("No models to download")
 
     results: list[dict] = []
     with httpx.Client(follow_redirects=True, timeout=120.0) as client:
         for spec in specs:
             results.append(
-                download_model(spec, pack_dir, force=force, client=client)
+                download_model(spec, model_dir, force=force, client=client)
             )
     return results

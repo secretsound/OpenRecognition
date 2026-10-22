@@ -1,0 +1,690 @@
+/* Shared kit. Views should prefer these classes over one-off CSS. */
+
+.or-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--or-space-6);
+  width: 100%;
+}
+
+.or-page--prose {
+  max-width: var(--or-prose-max);
+}
+
+.or-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--or-space-4);
+}
+
+.or-page-header__lead {
+  margin-bottom: var(--or-space-3);
+}
+
+.or-page-header__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--or-space-4);
+  flex-wrap: wrap;
+}
+
+.or-page-header__desc {
+  margin-top: var(--or-space-2);
+  max-width: 40rem;
+  font-size: var(--or-text-body);
+  line-height: var(--or-leading);
+  color: var(--or-text-3);
+}
+
+.or-page-header__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--or-space-2);
+  margin-top: var(--or-space-3);
+}
+
+.or-page-header__action {
+  display: flex;
+  align-items: center;
+  gap: var(--or-space-2);
+  flex-shrink: 0;
+}
+
+.or-page-header__extra,
+.or-page-header__tabs {
+  margin-top: var(--or-space-4);
+}
+
+.or-surface {
+  background: var(--or-surface);
+  border: 1px solid var(--or-line);
+  border-radius: var(--or-radius-lg);
+}
+
+.or-surface--none {
+  padding: 0;
+}
+
+.or-surface--sm {
+  padding: var(--or-space-4);
+}
+
+.or-surface--md {
+  padding: var(--or-space-5) var(--or-space-6);
+}
+
+.or-surface--lg {
+  padding: var(--or-space-6) var(--or-space-8);
+}
+
+.or-surface--sunken {
+  background: var(--or-surface-sunken);
+  border-color: transparent;
+}
+
+.or-surface--raised {
+  background: var(--or-surface-raised);
+  box-shadow: var(--or-shadow);
+}
+
+.or-surface--interactive {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  transition: border-color var(--or-dur) var(--or-ease);
+}
+
+.or-surface--interactive:hover {
+  border-color: var(--or-accent);
+}
+
+.or-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: var(--or-space-4);
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
+  background: var(--or-surface);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    border-color var(--or-dur) var(--or-ease),
+    box-shadow var(--or-dur) var(--or-ease),
+    background var(--or-dur) var(--or-ease);
+}
+
+.or-choice:hover {
+  border-color: var(--or-accent);
+}
+
+.or-choice.is-selected {
+  border-color: var(--or-accent);
+  background: var(--or-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--or-accent);
+}
+
+.or-choice:focus-visible {
+  outline: none;
+  box-shadow: var(--or-focus-ring);
+}
+
+.or-choice:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.or-choice__icon {
+  color: var(--or-accent);
+}
+
+.or-choice__title {
+  font-size: var(--or-text-body);
+  font-weight: 600;
+}
+
+.or-choice__desc {
+  font-size: var(--or-text-small);
+  line-height: var(--or-leading);
+  color: var(--or-text-3);
+}
+
+.or-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--or-space-3);
+}
+
+.or-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--or-radius-full);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+}
+
+button.or-chip {
+  cursor: pointer;
+}
+
+.or-chip--sm {
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--or-text-micro);
+}
+
+.or-chip--md {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--or-text-small);
+}
+
+.or-chip--default {
+  background: var(--or-surface-sunken);
+  color: var(--or-text-2);
+}
+
+.or-chip--success {
+  background: color-mix(in oklab, var(--or-success) 16%, transparent);
+  color: var(--or-success);
+}
+
+.or-chip--warning {
+  background: color-mix(in oklab, var(--or-warning) 16%, transparent);
+  color: var(--or-warning);
+}
+
+.or-chip--error {
+  background: color-mix(in oklab, var(--or-error) 16%, transparent);
+  color: var(--or-error);
+}
+
+.or-chip--info {
+  background: color-mix(in oklab, var(--or-info) 16%, transparent);
+  color: var(--or-info);
+}
+
+.or-chip--accent {
+  background: var(--or-accent-tint);
+  color: var(--or-accent);
+}
+
+.or-chip--audio {
+  background: color-mix(in oklab, var(--or-audio) 16%, transparent);
+  color: var(--or-audio);
+}
+
+.or-chip--image {
+  background: color-mix(in oklab, var(--or-image) 16%, transparent);
+  color: var(--or-image);
+}
+
+.or-chip--video {
+  background: color-mix(in oklab, var(--or-video) 16%, transparent);
+  color: var(--or-video);
+}
+
+.or-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--or-radius-full);
+  background: var(--or-surface-sunken);
+  color: var(--or-text-2);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  user-select: none;
+}
+
+.or-mark--sm {
+  width: 28px;
+  height: 28px;
+  font-size: 11px;
+}
+
+.or-mark--md {
+  width: 36px;
+  height: 36px;
+  font-size: 13px;
+}
+
+.or-mark--lg {
+  width: 56px;
+  height: 56px;
+  font-size: 18px;
+}
+
+.or-mark--xl {
+  width: 80px;
+  height: 80px;
+  font-size: 26px;
+}
+
+.or-mark__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.or-mark__type {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--or-radius-full);
+  background: var(--or-surface);
+  color: var(--or-text-2);
+  box-shadow: 0 0 0 2px var(--or-bg);
+}
+
+.or-mark--lg .or-mark__type,
+.or-mark--xl .or-mark__type {
+  width: 18px;
+  height: 18px;
+}
+
+.or-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--or-space-2);
+  min-width: 0;
+}
+
+.or-meter__track {
+  position: relative;
+  flex: 1;
+  min-width: 48px;
+  height: 6px;
+  border-radius: var(--or-radius-full);
+  background: var(--or-surface-sunken);
+  overflow: hidden;
+}
+
+.or-meter--sm .or-meter__track {
+  height: 4px;
+}
+
+.or-meter--lg .or-meter__track {
+  height: 8px;
+}
+
+.or-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--or-text-3);
+}
+
+.or-meter--met .or-meter__fill {
+  background: var(--or-success);
+}
+
+.or-meter--near .or-meter__fill {
+  background: var(--or-warning);
+}
+
+.or-meter--far .or-meter__fill {
+  background: var(--or-text-3);
+}
+
+.or-meter__tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--or-text-1);
+  opacity: 0.45;
+}
+
+.or-meter__label {
+  flex-shrink: 0;
+  min-width: 2.4em;
+  font-size: var(--or-text-small);
+  font-weight: 600;
+  color: var(--or-text-2);
+}
+
+.or-segment {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--or-radius-md);
+  background: var(--or-surface-sunken);
+}
+
+.or-segment__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--or-text-2);
+  font: inherit;
+  font-weight: 500;
+  font-size: var(--or-text-small);
+  padding: 6px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.or-segment__item.is-active {
+  background: var(--or-surface);
+  color: var(--or-text-1);
+  box-shadow: var(--or-shadow);
+}
+
+.or-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--or-space-3);
+}
+
+.or-filters__clear {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--or-accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+
+.or-datalist__cards {
+  display: none;
+  flex-direction: column;
+  gap: var(--or-space-3);
+}
+
+.or-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
+  background: var(--or-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.or-list-card:hover {
+  border-color: var(--or-accent);
+}
+
+.or-list-card__title {
+  font-weight: 600;
+}
+
+.or-list-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--or-text-3);
+  font-size: var(--or-text-small);
+}
+
+.or-table-wrap {
+  border: 1px solid var(--or-line);
+  border-radius: var(--or-radius-md);
+  overflow: hidden;
+  background: var(--or-surface);
+}
+
+.or-savebar-slot {
+  height: 72px;
+}
+
+.or-savebar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--or-space-4) + env(safe-area-inset-bottom));
+  z-index: 200;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--or-space-3);
+  width: min(36rem, calc(100vw - 2rem));
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--or-surface-raised);
+  border: 1px solid var(--or-line);
+  box-shadow: var(--or-shadow-raised);
+  transform: translateX(-50%);
+}
+
+@media (max-width: 899px) {
+  .or-savebar {
+    bottom: calc(var(--or-space-3) + var(--or-bottombar-h) + env(safe-area-inset-bottom));
+  }
+}
+
+.or-savebar__copy {
+  font-size: var(--or-text-small);
+  color: var(--or-text-2);
+}
+
+.or-savebar__actions {
+  display: flex;
+  gap: var(--or-space-2);
+}
+
+.or-savebar__ghost,
+.or-savebar__primary {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  border-radius: var(--or-radius-sm);
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.or-savebar__ghost {
+  background: transparent;
+  color: var(--or-text-2);
+}
+
+.or-savebar__primary {
+  background: var(--or-accent);
+  color: var(--or-on-accent);
+}
+
+.or-savebar__primary:disabled,
+.or-savebar__ghost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.or-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.or-skel__line,
+.or-skel__block,
+.or-skel__card {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--or-text-1) 6%, transparent),
+    color-mix(in oklab, var(--or-text-1) 11%, transparent),
+    color-mix(in oklab, var(--or-text-1) 6%, transparent)
+  );
+  background-size: 200% 100%;
+  animation: or-shimmer 1.2s var(--or-ease) infinite;
+  border-radius: var(--or-radius-sm);
+}
+
+.or-skel__line {
+  height: 12px;
+  width: 100%;
+}
+
+.or-skel__line--title {
+  height: 28px;
+  width: 40%;
+}
+
+.or-skel__line--desc {
+  width: 70%;
+}
+
+.or-skel__line--label {
+  width: 28%;
+  height: 10px;
+}
+
+.or-skel__row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.or-skel__block,
+.or-skel__card {
+  height: 88px;
+}
+
+.or-skel--cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+@keyframes or-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.or-banners {
+  display: flex;
+  flex-direction: column;
+  gap: var(--or-space-2);
+}
+
+.or-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--or-space-3);
+  padding: 10px 12px;
+  border-radius: var(--or-radius-md);
+  border: 1px solid var(--or-line);
+}
+
+.or-banner--warning {
+  background: color-mix(in oklab, var(--or-warning) 10%, var(--or-surface));
+}
+
+.or-banner--error {
+  background: color-mix(in oklab, var(--or-error) 10%, var(--or-surface));
+}
+
+.or-banner--info {
+  background: color-mix(in oklab, var(--or-info) 10%, var(--or-surface));
+}
+
+.or-banner__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--or-text-small);
+}
+
+.or-banner__copy strong {
+  font-weight: 600;
+}
+
+.or-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.or-palette {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.or-palette__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--or-radius-sm);
+  cursor: pointer;
+}
+
+.or-palette__item.is-active,
+.or-palette__item:hover {
+  background: var(--or-hover);
+}
+
+.or-palette__empty {
+  padding: 16px 12px;
+}
+
+.or-time {
+  color: var(--or-text-3);
+  font-size: var(--or-text-small);
+}
+
+.or-footer-count {
+  font-size: var(--or-text-small);
+  color: var(--or-text-3);
+}
+
+@media (max-width: 899px) {
+  .or-datalist__table {
+    display: none;
+  }
+
+  .or-datalist__cards {
+    display: flex;
+  }
+}
+
+@media (max-width: 639px) {
+  .or-segment {
+    width: 100%;
+  }
+
+  .or-segment__item {
+    flex: 1;
+    text-align: center;
+  }
+}

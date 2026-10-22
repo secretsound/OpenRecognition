@@ -8,7 +8,6 @@ import {
   NTag,
   NSpace,
   NAlert,
-  NSkeleton,
   NPopconfirm,
   NIcon,
   NCode,
@@ -18,7 +17,9 @@ import type { DataTableColumns } from "naive-ui";
 import { AddOutline, TrashOutline, CopyOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
 import type { ApiKeyOut, ApiKeyCreated } from "@/types/api";
-import AppPageHeader from "@/components/AppPageHeader.vue";
+import PageHeader from "@/components/kit/PageHeader.vue";
+import DataList from "@/components/kit/DataList.vue";
+import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import CreateApiKeyModal from "@/components/CreateApiKeyModal.vue";
 import { KeyOutline } from "@vicons/ionicons5";
@@ -220,8 +221,8 @@ watch(
 </script>
 
 <template>
-  <div>
-    <AppPageHeader
+  <div class="or-page">
+    <PageHeader
       title="API keys"
       description="Keys let other apps call this server. REST is the web API. MCP is the tool list an AI assistant can use."
     >
@@ -233,60 +234,60 @@ watch(
           Create key
         </NButton>
       </template>
-    </AppPageHeader>
+    </PageHeader>
 
-    <NSpace vertical :size="16">
-      <NSkeleton v-if="loading && !rows.length" text :repeat="6" />
-      <EmptyState
-        v-else-if="!loading && loadError"
-        title="Couldn't load API keys"
-        :description="loadError"
-        action-label="Retry"
-        @action="load"
-      />
-      <EmptyState
-        v-else-if="!loading && rows.length === 0"
-        title="No API keys"
-        description="Create a key with REST scopes, MCP tools, or both."
-        :icon="KeyOutline"
-        action-label="Create key"
-        @action="openCreate('default')"
-      />
-      <template v-else>
-        <div class="or-list-cards">
-          <div v-for="row in rows" :key="row.id" class="or-list-card key-card">
-            <span class="or-list-card__title">{{ row.name }}</span>
+    <ContentSkeleton v-if="loading && !rows.length" variant="table" />
+    <EmptyState
+      v-else-if="!loading && loadError"
+      title="Couldn't load API keys"
+      :description="loadError"
+      action-label="Retry"
+      @action="load"
+    />
+    <EmptyState
+      v-else-if="!loading && rows.length === 0"
+      title="No API keys"
+      description="Create a key with REST scopes, MCP tools, or both."
+      :icon="KeyOutline"
+      action-label="Create key"
+      @action="openCreate('default')"
+    />
+    <template v-else>
+      <DataList :items="rows" :get-key="(row) => row.id">
+        <template #table>
+          <div class="or-table-wrap">
+            <NDataTable
+              :columns="columns"
+              :data="rows"
+              :loading="loading"
+              :bordered="false"
+              size="medium"
+              :row-key="(row: ApiKeyOut) => row.id"
+            />
+          </div>
+        </template>
+        <template #card="{ item }">
+          <div class="or-list-card key-card">
+            <span class="or-list-card__title">{{ item.name }}</span>
             <span class="or-list-card__meta">
               <span>
                 Last used
-                {{ row.last_used_at ? new Date(row.last_used_at).toLocaleString() : "never" }}
+                {{ item.last_used_at ? new Date(item.last_used_at).toLocaleString() : "never" }}
               </span>
-              <NPopconfirm @positive-click="revoke(row.id)">
+              <NPopconfirm @positive-click="revoke(item.id)">
                 <template #trigger>
                   <NButton size="small" quaternary type="error">Remove</NButton>
                 </template>
-                Delete API key "{{ row.name }}"? Apps using it will stop working.
+                Delete API key "{{ item.name }}"? Apps using it will stop working.
               </NPopconfirm>
             </span>
           </div>
-        </div>
-        <div class="or-table-wrap or-table-desktop">
-        <NDataTable
-          :columns="columns"
-          :data="rows"
-          :loading="loading"
-          :bordered="false"
-          size="medium"
-          :row-key="(row: ApiKeyOut) => row.id"
-        />
-        </div>
-        <div class="admin-table-footer">
-          <span class="admin-table-total">
-            {{ rows.length }} key{{ rows.length === 1 ? "" : "s" }}
-          </span>
-        </div>
-      </template>
-    </NSpace>
+        </template>
+      </DataList>
+      <p class="or-footer-count">
+        {{ rows.length }} key{{ rows.length === 1 ? "" : "s" }}
+      </p>
+    </template>
 
     <CreateApiKeyModal
       v-model:show="showCreate"
@@ -334,8 +335,6 @@ watch(
 </template>
 
 <style scoped>
-@import "@/styles/admin-table.css";
-
 .key-card {
   cursor: default;
 }

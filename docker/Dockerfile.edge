@@ -16,7 +16,6 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src/
-COPY model-packs ./model-packs/
 COPY --from=web-builder /build/dist ./web/dist/
 
 RUN pip install --no-cache-dir . \
@@ -27,10 +26,9 @@ RUN chmod +x /entrypoint.sh
 
 ENV OPENRECOGNITION_HOST=0.0.0.0 \
     OPENRECOGNITION_PORT=8080 \
-    OPENRECOGNITION_PACK=edge \
     OPENRECOGNITION_DATA_DIR=/data \
+    OPENRECOGNITION_MODELS_DIR=/models \
     OPENRECOGNITION_MODEL_PACKS_DIR=/models \
-    OPENRECOGNITION_SHIPPED_PACKS_DIR=/app/model-packs \
     OPENRECOGNITION_WEB_DIST=/app/web/dist
 
 VOLUME /data /models

@@ -2,7 +2,7 @@
 
 from openrecognition.gallery import match
 from openrecognition.inference.audio_gate import load_wav_pcm
-from openrecognition.inference.speaker import heuristic_speaker_embedding
+from openrecognition.inference.speaker import heuristic_speaker_embedding, rate_shift
 
 from tests.helpers import wav_bytes
 
@@ -10,6 +10,16 @@ from tests.helpers import wav_bytes
 def _embed_wav(data: bytes):
     audio, sr = load_wav_pcm(data)
     return heuristic_speaker_embedding(audio, sr)
+
+
+def test_rate_shift_shortens_when_raised():
+    import numpy as np
+
+    audio = np.linspace(-0.2, 0.2, 16000, dtype=np.float32)
+    faster = rate_shift(audio, 1.06)
+    slower = rate_shift(audio, 0.94)
+    assert faster.size < audio.size
+    assert slower.size > audio.size
 
 
 def test_same_clip_has_high_similarity():

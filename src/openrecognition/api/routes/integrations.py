@@ -1,6 +1,6 @@
 """External integrations: webhooks, MQTT, and related connectors."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from openrecognition.api.deps import get_state, require_scope
 from openrecognition.api.errors import bad_request, not_found
@@ -10,7 +10,11 @@ from openrecognition.api.integrations_connectivity import (
 )
 from openrecognition.api.integrations_discover import mdns_discovery_out
 from openrecognition.api.integrations_mcp import mcp_settings_out
-from openrecognition.api.integrations_mqtt import apply_mqtt_patch, mqtt_settings_out
+from openrecognition.api.integrations_mqtt import (
+    apply_mqtt_patch,
+    mqtt_settings_out,
+    test_mqtt_settings,
+)
 from openrecognition.api.integrations_wyoming import apply_wyoming_patch, wyoming_settings_out
 from openrecognition.app_state import AppState
 from openrecognition.models.schemas import (
@@ -20,8 +24,10 @@ from openrecognition.models.schemas import (
     MdnsDiscoveryOut,
     MqttIntegrationOut,
     MqttIntegrationPatch,
+    MqttIntegrationTestIn,
     WebhookSubscriptionCreate,
     WebhookSubscriptionOut,
+    WebhookSubscriptionPatch,
     WyomingHomeAssistantTestIn,
     WyomingIntegrationOut,
     WyomingIntegrationPatch,
@@ -34,13 +40,14 @@ router = APIRouter(prefix="/v1/integrations", tags=["integrations"])
 
 @router.get("", response_model=IntegrationsOverviewOut)
 def get_integrations_overview(
+    request: Request,
     state: AppState = Depends(get_state),
     auth=Depends(require_scope("read")),
 ):
     return IntegrationsOverviewOut(
         mqtt=MqttIntegrationOut(**mqtt_settings_out(state)),
         wyoming=WyomingIntegrationOut(**wyoming_settings_out(state)),
-        mcp=McpIntegrationOut(**mcp_settings_out(state, auth)),
+        mcp=McpIntegrationOut(**mcp_settings_out(state, auth, request)),
         webhooks=[WebhookSubscriptionOut(**s) for s in state.webhooks.list_all()],
     )
 
@@ -56,10 +63,11 @@ async def discover_integrations(
 
 @router.get("/mcp", response_model=McpIntegrationOut)
 def get_mcp(
+    request: Request,
     state: AppState = Depends(get_state),
     auth=Depends(require_scope("read")),
 ):
-    return McpIntegrationOut(**mcp_settings_out(state, auth))
+    return McpIntegrationOut(**mcp_settings_out(state, auth, request))
 
 
 @router.get("/mqtt", response_model=MqttIntegrationOut)
@@ -80,6 +88,15 @@ def patch_mqtt(
     return MqttIntegrationOut(**mqtt_settings_out(state))
 
 
+@router.post("/mqtt/test", response_model=IntegrationConnectivityOut)
+def test_mqtt(
+    body: MqttIntegrationTestIn,
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    return IntegrationConnectivityOut(**test_mqtt_settings(state, body))
+
+
 @router.get("/wyoming", response_model=WyomingIntegrationOut)
 def get_wyoming(
     state: AppState = Depends(get_state),
@@ -94,8 +111,8 @@ async def patch_wyoming(
     state: AppState = Depends(get_state),
     _auth=Depends(require_scope("admin")),
 ):
-    apply_wyoming_patch(state, body)
-    await state.wyoming.restart(state)
+    if apply_wyoming_patch(state, body):
+        await state.wyoming.restart(state)
     return WyomingIntegrationOut(**wyoming_settings_out(state))
 
 
@@ -133,10 +150,36 @@ def create_webhook(
 ):
     try:
         sub = state.webhooks.create(
-            body.url, body.events, body.filters, body.debounce_seconds
+            body.url,
+            body.events,
+            body.filters,
+            body.debounce_seconds,
+            name=body.name,
+            title_template=body.title_template,
+            message_template=body.message_template,
+            include_details=body.include_details,
         )
     except UnsafeUrlError as exc:
         raise bad_request("UNSAFE_URL", str(exc)) from exc
+    return WebhookSubscriptionOut(**sub)
+
+
+@router.patch("/webhooks/{subscription_id}", response_model=WebhookSubscriptionOut)
+def patch_webhook(
+    subscription_id: str,
+    body: WebhookSubscriptionPatch,
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    try:
+        sub = state.webhooks.update(
+            subscription_id,
+            **body.model_dump(exclude_unset=True),
+        )
+    except UnsafeUrlError as exc:
+        raise bad_request("UNSAFE_URL", str(exc)) from exc
+    if not sub:
+        raise not_found("Webhook subscription not found")
     return WebhookSubscriptionOut(**sub)
 
 

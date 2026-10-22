@@ -1,31 +1,19 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useAccent } from "@/composables/useAccent";
-
-const props = withDefaults(
+withDefaults(
   defineProps<{
     size?: number;
     title?: string;
-    /** White tile + primary icon — for accent gradient panels (login). */
-    variant?: "default" | "on-dark";
+    /** Inverted: light tile with accent glyph, for accent or dark backgrounds. */
+    variant?: "default" | "inverted";
   }>(),
   { size: 32, title: "OpenRecognition", variant: "default" },
-);
-
-const { preset } = useAccent();
-
-const bgFill = computed(() =>
-  props.variant === "on-dark" ? "rgba(255, 255, 255, 0.95)" : preset.value.primary,
-);
-
-const iconColor = computed(() =>
-  props.variant === "on-dark" ? preset.value.primary : "#ffffff",
 );
 </script>
 
 <template>
   <svg
     class="logo-mark"
+    :class="`logo-mark--${variant}`"
     :width="size"
     :height="size"
     :aria-label="title"
@@ -34,11 +22,11 @@ const iconColor = computed(() =>
     viewBox="0 0 32 32"
     fill="none"
   >
-    <rect width="32" height="32" rx="8" :fill="bgFill" />
-    <circle cx="16" cy="14" r="6" :stroke="iconColor" stroke-width="2" />
+    <rect width="32" height="32" rx="8" class="logo-mark__tile" />
+    <circle cx="16" cy="14" r="6" class="logo-mark__stroke" stroke-width="2" />
     <path
       d="M8 26c2-4 6-6 8-6s6 2 8 6"
-      :stroke="iconColor"
+      class="logo-mark__stroke"
       stroke-width="2"
       stroke-linecap="round"
     />
@@ -49,5 +37,21 @@ const iconColor = computed(() =>
 .logo-mark {
   flex-shrink: 0;
   display: block;
+}
+
+.logo-mark__tile {
+  fill: var(--or-accent);
+}
+
+.logo-mark__stroke {
+  stroke: var(--or-on-accent);
+}
+
+.logo-mark--inverted .logo-mark__tile {
+  fill: rgba(255, 255, 255, 0.95);
+}
+
+.logo-mark--inverted .logo-mark__stroke {
+  stroke: var(--or-accent);
 }
 </style>

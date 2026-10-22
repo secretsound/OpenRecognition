@@ -8,6 +8,7 @@ from openrecognition.app_state import RESTART_REQUIRED_KEYS, AppState
 from openrecognition.models.schemas import (
     AppSettingsOut,
     AppSettingsPatch,
+    HardwareOut,
     RecognitionLogListOut,
     RecognitionLogOut,
     ServiceRestartOut,
@@ -32,12 +33,12 @@ def _settings_out(state: AppState) -> AppSettingsOut:
         default_return_unknown=state.default_return_unknown,
         default_include_sound_events=state.default_include_sound_events,
         recognition_log_retention_days=state.recognition_logs.retention_days,
-        pack=s.pack,
+        hardware=HardwareOut(**state.hardware_info()),
         auth_required=s.auth_required,
         docs_enabled=s.docs_enabled,
         web_enabled=s.web_enabled,
         data_dir=str(s.data_dir),
-        model_packs_dir=str(s.model_packs_dir),
+        models_dir=str(s.models_dir),
         session_ttl_minutes=s.session_ttl_minutes,
         mqtt_enabled=s.mqtt_enabled,
         mqtt_host=s.mqtt_host,
@@ -102,6 +103,9 @@ def patch_settings(
     if body.model_idle_unload_minutes is not None:
         state.settings.model_idle_unload_minutes = body.model_idle_unload_minutes
         state.pool.idle_unload_minutes = body.model_idle_unload_minutes
+    if "onnx_intra_op_threads" in body.model_fields_set:
+        state.thread_override = body.onnx_intra_op_threads
+        state.apply_threads()
     state.persist_runtime()
     return _settings_out(state)
 

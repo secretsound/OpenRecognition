@@ -91,6 +91,7 @@ async function uploadClip() {
     :title="`Video clip — ${enrollmentLabel}`"
     :steps="steps"
     :current="step"
+    layout="progress"
   >
     <div v-if="step === 0" class="step-body">
       <p>

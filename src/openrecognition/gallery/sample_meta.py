@@ -84,6 +84,14 @@ def parse_sample_meta_form(raw: str | None, file_count: int) -> list[SampleMeta 
 
 
 def source_display(meta: SampleMeta) -> str:
+    if meta.source == "face_wizard":
+        if meta.phrase_text:
+            return f"Face: {meta.phrase_text.replace('_', ' ')}"
+        return "Guided face"
+    if meta.source == "photo_wizard":
+        if meta.phrase_text:
+            return f"Photo: {meta.phrase_text.replace('_', ' ')}"
+        return "Guided photo"
     if meta.source == "voice_wizard":
         if meta.phrase_index is not None:
             n = meta.phrase_index + 1

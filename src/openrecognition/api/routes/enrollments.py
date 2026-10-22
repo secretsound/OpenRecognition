@@ -5,7 +5,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile  # noqa: F401
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile  # noqa: F401
 from PIL import Image, UnidentifiedImageError
 
 from openrecognition.api.deps import get_request_id, get_state, require_scope
@@ -20,6 +20,7 @@ from openrecognition.models.schemas import (
     EnrollmentType,
     QualityInfo,
     SampleOut,
+    SamplePreviewOut,
 )
 from openrecognition.pipelines.video import process_video_enrollment
 
@@ -125,10 +126,10 @@ def _embed_sample(
                 "INVALID_MEDIA",
                 "Sound enrollments require audio files (WAV, MP3, FLAC, OGG).",
             )
-        return state.speaker.embed(data), state.speaker.model_version, "audio"
+        return state.speaker.embed(data, stabilize=True), state.speaker.model_version, "audio"
     # person: voice and/or face
     if kind == "audio":
-        return state.speaker.embed(data), state.speaker.model_version, "audio"
+        return state.speaker.embed(data, stabilize=True), state.speaker.model_version, "audio"
     if kind == "image":
         return state.vision.embed_face(data), state.vision.face_model_version, "image"
     raise bad_request("INVALID_MEDIA", "Unsupported file for person enrollment.")
@@ -183,7 +184,12 @@ def _log_enrollment(
     )
 
 
-def _to_out(en: dict, quality: QualityInfo | None = None, dup: str | None = None) -> EnrollmentOut:
+def _to_out(
+    en: dict,
+    quality: QualityInfo | None = None,
+    dup: str | None = None,
+    last_seen: str | None = None,
+) -> EnrollmentOut:
     return EnrollmentOut(
         id=en["id"],
         type=EnrollmentType(en["type"]),
@@ -196,6 +202,7 @@ def _to_out(en: dict, quality: QualityInfo | None = None, dup: str | None = None
         learn_margin=float(en.get("learn_margin") or 0.0),
         learn_daily_cap=int(en.get("learn_daily_cap") or 0),
         learn_max_samples=int(en.get("learn_max_samples") or 1),
+        wyoming_min_confidence=en.get("wyoming_min_confidence"),
         external_ids=en.get("external_ids") or {},
         sample_count=en["sample_count"],
         model_version=en.get("model_version"),
@@ -203,6 +210,7 @@ def _to_out(en: dict, quality: QualityInfo | None = None, dup: str | None = None
         updated_at=en["updated_at"],
         quality=quality,
         duplicate_warning=dup,
+        last_seen_at=last_seen,
     )
 
 
@@ -358,6 +366,8 @@ async def create_enrollment(
             default_source="enrollment_create",
             sample_meta_json=sample_meta,
         )
+    else:
+        quality = state.gallery.evaluate_enrollment(en["id"])
     en_out = state.gallery.get_enrollment(en["id"])
     summary = f"Created {type.value} enrollment"
     if files:
@@ -368,14 +378,15 @@ async def create_enrollment(
 
 @router.get("", response_model=list[EnrollmentOut])
 def list_enrollments(
-    type: str | None = None,
+    type: str | None = Query(None, description="Filter by enrollment type"),
+    q: str | None = Query(None, description="Case-insensitive name search"),
     state: AppState = Depends(get_state),
     _auth=Depends(require_scope("read")),
 ):
-    return [
-        _to_out(e, state.gallery.evaluate_enrollment(e["id"]))
-        for e in state.gallery.list_enrollments(type)
-    ]
+    rows = state.gallery.list_enrollments(type, q=q)
+    quality = state.gallery.evaluate_many(rows)
+    seen = state.gallery.presence_map()
+    return [_to_out(e, quality.get(e["id"]), last_seen=seen.get(e["id"])) for e in rows]
 
 
 @router.get("/{enrollment_id}", response_model=EnrollmentOut)
@@ -387,7 +398,11 @@ def get_enrollment(
     en = state.gallery.get_enrollment(enrollment_id)
     if not en:
         raise not_found("Enrollment not found")
-    return _to_out(en, state.gallery.evaluate_enrollment(enrollment_id))
+    return _to_out(
+        en,
+        state.gallery.evaluate_enrollment(enrollment_id),
+        last_seen=state.gallery.last_seen_at(enrollment_id),
+    )
 
 
 @router.patch("/{enrollment_id}", response_model=EnrollmentOut)
@@ -406,7 +421,11 @@ def patch_enrollment(
     en = state.gallery.patch_enrollment(enrollment_id, **updates)
     if not en:
         raise not_found("Enrollment not found")
-    return _to_out(en, state.gallery.evaluate_enrollment(enrollment_id))
+    return _to_out(
+        en,
+        state.gallery.evaluate_enrollment(enrollment_id),
+        last_seen=state.gallery.last_seen_at(enrollment_id),
+    )
 
 
 @router.delete("/{enrollment_id}", status_code=204)
@@ -448,6 +467,201 @@ def delete_sample(
         raise not_found("Sample not found")
 
 
+def _duration_score(duration_ms: float | None) -> float:
+    if duration_ms is None:
+        return 0.5
+    if duration_ms < 1500:
+        return 0.15
+    if duration_ms < 2500:
+        return 0.35
+    if duration_ms < 4000:
+        return 0.7
+    if duration_ms <= 8000:
+        return 1.0
+    if duration_ms <= 12000:
+        return 0.9
+    return 0.75
+
+
+def _preview_advice(issues: list[str], *, has_fit: bool, kind: str = "audio") -> str:
+    if "silence" in issues:
+        return "Almost no voice was heard. Move closer or speak louder."
+    if "too_short" in issues:
+        return "Finish the whole sentence — four to six seconds works best."
+    if "music" in issues:
+        return "This sounds like music, not speech. Try again in a quiet room."
+    if "background_noise" in issues:
+        return "Too much background noise. Try a quieter room and re-record."
+    if "no_face" in issues:
+        return "No face was found. Look at the camera and fit your face in the oval."
+    if "face_too_small" in issues:
+        return "Move closer so your face fills more of the frame."
+    if "too_dark" in issues:
+        return "This is too dark. Face a window or lamp — don't stand with bright light behind you."
+    if "too_bright" in issues:
+        return "This is washed out. Turn so the light is not shining straight into the lens."
+    if "blurry" in issues:
+        return "This is soft. Hold still and try again."
+    if "multiple_faces" in issues:
+        return "More than one face is in the shot. Get the others out of frame."
+    if "poor_fit" in issues:
+        if kind == "image":
+            return "This photo does not match the face you already taught. Make sure it is the same person."
+        return "This take does not match your other voice samples. Make sure it is the same person."
+    if "low_fit" in issues:
+        if kind == "image":
+            return "This photo is a bit different from your other shots. Retake if it is not the same person."
+        return "This take is a bit different from your other samples. Re-record if someone else was talking."
+    if "a_bit_short" in issues:
+        return "A little short. Re-record if you cut off the last words."
+    if has_fit:
+        return "This take looks good and matches what you already taught."
+    return "This take looks good."
+
+
+def _preview_audio(
+    state: AppState,
+    enrollment_id: str,
+    etype: str,
+    data: bytes,
+) -> SamplePreviewOut:
+    duration_ms = _audio_duration_ms(data)
+    gate = state.gate.run(data)
+    speech = (gate.scores or {}).get("speech")
+    issues: list[str] = []
+
+    if duration_ms is not None and duration_ms < 2500:
+        issues.append("too_short")
+    elif duration_ms is not None and duration_ms < 4000:
+        issues.append("a_bit_short")
+
+    if gate.gate == "reject" and gate.reason:
+        if gate.reason not in issues:
+            issues.append(gate.reason)
+
+    sim: float | None = None
+    try:
+        vec, model_version, _ = _embed_sample(state, etype, data, "audio")
+        raw = state.gallery.similarity_to_centroid(enrollment_id, vec, model_version)
+        if raw is not None:
+            sim = float(raw)
+            if sim < 0.35:
+                issues.append("poor_fit")
+            elif sim < 0.5:
+                issues.append("low_fit")
+    except Exception:
+        sim = None
+
+    speech_score = float(speech) if speech is not None else 0.5
+    if gate.gate == "reject":
+        speech_score = min(speech_score, 0.25)
+    duration_score = _duration_score(duration_ms)
+    if sim is None:
+        score = 0.45 * duration_score + 0.55 * speech_score
+    else:
+        score = 0.3 * duration_score + 0.35 * speech_score + 0.35 * sim
+    score = max(0.0, min(1.0, score))
+
+    hard = {"too_short", "silence", "poor_fit", "music"}
+    verdict = "retry" if score < 0.55 or any(i in hard for i in issues) else "keep"
+
+    return SamplePreviewOut(
+        score=round(score, 3),
+        verdict=verdict,
+        duration_ms=duration_ms,
+        gate=gate.gate,
+        reason=gate.reason,
+        speech=round(speech_score, 3),
+        centroid_similarity=round(sim, 4) if sim is not None else None,
+        issues=issues,
+        advice=_preview_advice(issues, has_fit=sim is not None, kind="audio"),
+    )
+
+
+def _preview_image(
+    state: AppState,
+    enrollment_id: str,
+    etype: str,
+    data: bytes,
+) -> SamplePreviewOut:
+    info = state.vision.inspect_image(data)
+    issues: list[str] = []
+    brightness = float(info.get("brightness") or 0)
+    sharpness = float(info.get("sharpness") or 0)
+    if brightness < 0.18:
+        issues.append("too_dark")
+    elif brightness > 0.9:
+        issues.append("too_bright")
+    if sharpness < 0.02:
+        issues.append("blurry")
+
+    if etype == "person" and info.get("detector"):
+        count = int(info.get("face_count") or 0)
+        frac = float(info.get("face_frac") or 0)
+        if count == 0:
+            issues.append("no_face")
+        elif count > 1:
+            issues.append("multiple_faces")
+        if count >= 1 and frac < 0.08:
+            issues.append("face_too_small")
+
+    sim: float | None = None
+    try:
+        vec, model_version, _ = _embed_sample(state, etype, data, "image")
+        raw = state.gallery.similarity_to_centroid(enrollment_id, vec, model_version)
+        if raw is not None:
+            sim = float(raw)
+            if sim < 0.35:
+                issues.append("poor_fit")
+            elif sim < 0.5:
+                issues.append("low_fit")
+    except Exception:
+        sim = None
+
+    light_score = 0.25 if ("too_dark" in issues or "too_bright" in issues) else 1.0
+    sharp_score = max(0.0, min(1.0, sharpness / 0.05))
+    face_score = 0.2 if "no_face" in issues else 1.0
+    if sim is None:
+        score = 0.35 * light_score + 0.35 * sharp_score + 0.3 * face_score
+    else:
+        score = 0.25 * light_score + 0.25 * sharp_score + 0.2 * face_score + 0.3 * sim
+    score = max(0.0, min(1.0, score))
+    hard = {"too_dark", "blurry", "no_face", "poor_fit"}
+    verdict = "retry" if score < 0.55 or any(i in hard for i in issues) else "keep"
+    return SamplePreviewOut(
+        score=round(score, 3),
+        verdict=verdict,
+        duration_ms=None,
+        gate=None,
+        reason=issues[0] if issues else None,
+        speech=None,
+        centroid_similarity=round(sim, 4) if sim is not None else None,
+        issues=issues,
+        advice=_preview_advice(issues, has_fit=sim is not None, kind="image"),
+    )
+
+
+@router.post("/{enrollment_id}/samples/preview", response_model=SamplePreviewOut)
+async def preview_sample(
+    enrollment_id: str,
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("enroll")),
+    file: UploadFile = File(...),
+):
+    en = state.gallery.get_enrollment(enrollment_id)
+    if not en:
+        raise not_found("Enrollment not found")
+    data = await file.read()
+    if not data:
+        raise bad_request("INVALID_MEDIA", "Empty file")
+    kind = _detect_media_kind(data, file.content_type, file.filename)
+    if kind == "audio":
+        return _preview_audio(state, enrollment_id, en["type"], data)
+    if kind == "image":
+        return _preview_image(state, enrollment_id, en["type"], data)
+    raise bad_request("INVALID_MEDIA", "Preview supports audio or photo takes.")
+
+
 @router.post("/{enrollment_id}/samples", response_model=EnrollmentOut)
 async def add_samples(
     enrollment_id: str,
@@ -477,7 +691,12 @@ async def add_samples(
         auth=auth,
         summary=f"Added {len(files)} sample(s)",
     )
-    return _to_out(en_out, quality, dup)
+    return _to_out(
+        en_out,
+        quality,
+        dup,
+        last_seen=state.gallery.last_seen_at(enrollment_id),
+    )
 
 
 @router.post("/{enrollment_id}/evaluate", response_model=QualityInfo)

@@ -221,7 +221,10 @@ class AudioGateEngine:
             from openrecognition.inference.silero_vad import gate_with_silero
 
             self.model_version = self.pool.model_version("silero_vad") or "silero-vad-onnx"
-            result = gate_with_silero(vad_session, audio, sr)
+            threshold = float(self.pool.onnx_config("silero_vad").get("speech_threshold", 0.28))
+            result = gate_with_silero(
+                vad_session, audio, sr, speech_threshold=threshold
+            )
             if clf_session is not None:
                 from openrecognition.inference.gate_classifier import refine_gate_with_classifier
 

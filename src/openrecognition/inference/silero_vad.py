@@ -20,7 +20,13 @@ def _initial_state() -> np.ndarray:
     return np.zeros(_STATE_SHAPE, dtype=np.float32)
 
 
-def gate_with_silero(session: Any, audio: np.ndarray, sr: int) -> GateResponse:
+def gate_with_silero(
+    session: Any,
+    audio: np.ndarray,
+    sr: int,
+    *,
+    speech_threshold: float = 0.28,
+) -> GateResponse:
     start = time.perf_counter()
     audio = resample(audio, sr, 16000)
     if len(audio) < _CHUNK:
@@ -68,7 +74,7 @@ def gate_with_silero(session: Any, audio: np.ndarray, sr: int) -> GateResponse:
     total = sum(scores.values()) + 1e-9
     scores = {k: v / total for k, v in scores.items()}
 
-    if speech_ratio >= 0.28:
+    if speech_ratio >= speech_threshold:
         gate, reason = "accept", None
     elif scores["noise"] > 0.65:
         gate, reason = "reject", "background_noise"

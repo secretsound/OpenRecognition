@@ -70,6 +70,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         ("learn_margin", "REAL NOT NULL DEFAULT 0.05"),
         ("learn_daily_cap", "INTEGER NOT NULL DEFAULT 8"),
         ("learn_max_samples", "INTEGER NOT NULL DEFAULT 20"),
+        ("wyoming_min_confidence", "REAL"),
     ]
     enroll_cols = _columns(conn, "enrollments")
     for name, ddl in learn_columns:
@@ -119,3 +120,45 @@ def run_migrations(conn: sqlite3.Connection) -> None:
             model_key TEXT NOT NULL
         )"""
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS catalog_models (
+            key TEXT PRIMARY KEY,
+            origin TEXT NOT NULL,
+            label TEXT NOT NULL,
+            category TEXT NOT NULL,
+            version TEXT NOT NULL,
+            url TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            license TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'other',
+            use_for TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            hardware TEXT NOT NULL DEFAULT 'pi',
+            hardware_note TEXT NOT NULL DEFAULT '',
+            tier TEXT NOT NULL DEFAULT 'recommended',
+            depends_on_json TEXT NOT NULL DEFAULT '[]',
+            enables_json TEXT NOT NULL DEFAULT '[]',
+            contract_json TEXT NOT NULL DEFAULT '{}',
+            defaults_json TEXT NOT NULL DEFAULT '{}',
+            sha256 TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS model_settings (
+            model_key TEXT PRIMARY KEY,
+            overrides_json TEXT NOT NULL DEFAULT '{}'
+        )"""
+    )
+
+    webhook_cols = _columns(conn, "webhook_subscriptions")
+    webhook_additions = [
+        ("name", "TEXT NOT NULL DEFAULT ''"),
+        ("title_template", "TEXT NOT NULL DEFAULT ''"),
+        ("message_template", "TEXT NOT NULL DEFAULT ''"),
+        ("include_details", "INTEGER NOT NULL DEFAULT 1"),
+    ]
+    for name, ddl in webhook_additions:
+        if name not in webhook_cols:
+            conn.execute(f"ALTER TABLE webhook_subscriptions ADD COLUMN {name} {ddl}")
