@@ -372,6 +372,7 @@ class WyomingIntegrationOut(BaseModel):
     tag_speaker: bool
     include_confidence: bool = True
     include_candidates: bool = False
+    include_sound_events: bool = False
     zeroconf_enabled: bool = True
     zeroconf_name: str = "openrecognition"
     advertise_host: str | None = None
@@ -394,6 +395,7 @@ class WyomingIntegrationPatch(BaseModel):
     tag_speaker: bool | None = None
     include_confidence: bool | None = None
     include_candidates: bool | None = None
+    include_sound_events: bool | None = None
     zeroconf_enabled: bool | None = None
     zeroconf_name: str | None = Field(None, min_length=1, max_length=63)
     advertise_host: str | None = Field(None, max_length=128)
@@ -425,6 +427,17 @@ class McpIntegrationOut(BaseModel):
     install_hint: str | None = None
 
 
+class GroupBriefOut(BaseModel):
+    id: str
+    name: str
+
+
+class EnrollmentGrantOut(BaseModel):
+    enrollment_id: str
+    can_add_samples: bool = False
+    can_manage: bool = False
+
+
 class AuthMeOut(BaseModel):
     credential_type: str
     name: str
@@ -432,6 +445,9 @@ class AuthMeOut(BaseModel):
     role: str | None = None
     mcp_tools: list[McpToolOut]
     mcp_resources: list[McpResourceOut]
+    groups: list[GroupBriefOut] = Field(default_factory=list)
+    enrollment_grants: list[EnrollmentGrantOut] = Field(default_factory=list)
+    library_limited: bool = False
 
 
 class IntegrationsOverviewOut(BaseModel):
@@ -475,17 +491,74 @@ class UserOut(BaseModel):
     username: str
     role: str
     created_at: str
+    groups: list[GroupBriefOut] = Field(default_factory=list)
 
 
 class UserCreate(BaseModel):
     username: str
     password: str
     role: str = "operator"
+    group_ids: list[str] | None = None
 
 
 class UserPatch(BaseModel):
     role: str | None = None
     password: str | None = None
+    group_ids: list[str] | None = None
+
+
+class GroupMemberOut(BaseModel):
+    id: str
+    username: str
+    role: str
+
+
+class GroupEnrollmentOut(BaseModel):
+    enrollment_id: str
+    label: str
+    type: str
+    can_add_samples: bool = False
+    can_manage: bool = False
+
+
+class GroupOut(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    grants_role: str | None = None
+    sso_name: str | None = None
+    system: bool = False
+    created_at: str
+    member_count: int = 0
+    enrollment_count: int = 0
+    members: list[GroupMemberOut] = Field(default_factory=list)
+    enrollments: list[GroupEnrollmentOut] = Field(default_factory=list)
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: str = ""
+    sso_name: str | None = None
+
+
+class GroupPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = None
+    sso_name: str | None = None
+
+
+class GroupMembersPut(BaseModel):
+    user_ids: list[str] = Field(default_factory=list)
+
+
+class GroupEnrollmentPut(BaseModel):
+    enrollment_id: str
+    can_add_samples: bool = False
+    can_manage: bool = False
+
+
+class GroupEnrollmentsPut(BaseModel):
+    enrollments: list[GroupEnrollmentPut] = Field(default_factory=list)
 
 
 class GalleryExportOut(BaseModel):
@@ -523,6 +596,7 @@ class AppSettingsOut(BaseModel):
     web_enabled: bool
     data_dir: str
     models_dir: str
+    model_packs_dir: str = ""
     session_ttl_minutes: int
     mqtt_enabled: bool
     mqtt_host: str
@@ -532,8 +606,114 @@ class AppSettingsOut(BaseModel):
     auth_rate_limit_per_minute: int
     host: str
     port: int
+    http_enabled: bool = True
+    https_enabled: bool = False
+    https_port: int = 8443
+    tls_cert_file: str = ""
+    tls_key_file: str = ""
+    tls_configured: bool = False
+    tls_readable: bool = False
+    tls_subject: str = ""
+    tls_expires_at: str = ""
+    tls_error: str = ""
+    public_url: str = ""
+    behind_proxy: bool = False
+    trusted_proxies: str = ""
+    display_language: str = "en"
+    display_timezone: str = "UTC"
+    logs_dir: str = ""
+    log_level: str = "info"
+    log_to_file: bool = True
+    log_max_mb: int = 5
+    log_backup_count: int = 5
+    log_file: str = ""
+    video_max_upload_bytes: int = 100 * 1024 * 1024
+    health_detail_public: bool = True
+    metrics_token_set: bool = False
+    sso_enabled: bool = False
+    sso_protocol: str = "oidc"
+    sso_label: str = "Single sign-on"
+    sso_auto_provision: bool = False
+    sso_default_role: str = "viewer"
+    sso_link_existing: bool = True
+    sso_username_claim: str = "preferred_username"
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret_set: bool = False
+    oidc_scopes: str = "openid profile email"
+    oidc_groups_claim: str = "groups"
+    saml_idp_entity_id: str = ""
+    saml_idp_sso_url: str = ""
+    saml_idp_x509_cert: str = ""
+    saml_sp_entity_id: str = ""
+    saml_username_attr: str = "uid"
+    saml_groups_attr: str = "groups"
+    sso_redirect_uri: str = ""
+    sso_acs_url: str = ""
+    sso_metadata_url: str = ""
+    sso_sp_entity_id: str = ""
     runtime_settings_path: str
     restart_required_for: list[str] = Field(default_factory=list)
+    restart_pending: list[str] = Field(default_factory=list)
+    env_only: list[str] = Field(default_factory=list)
+
+
+class ServerLogsOut(BaseModel):
+    path: str
+    level: str
+    file_enabled: bool
+    lines: list[str]
+
+
+class UiConfigOut(BaseModel):
+    display_language: str
+    display_timezone: str = "UTC"
+    sso_enabled: bool
+    sso_protocol: str
+    sso_label: str
+
+
+class StorageUsageOut(BaseModel):
+    data_bytes: int
+    models_bytes: int
+    logs_bytes: int
+
+
+class BackupRestoreOut(BaseModel):
+    ok: bool = True
+    message: str
+
+
+class SelfSignedTlsRequest(BaseModel):
+    hostname: str = Field(min_length=1, max_length=253)
+
+
+class SelfSignedTlsOut(BaseModel):
+    cert_pem: str
+    key_pem: str
+    subject: str
+    expires_at: str
+
+
+class OidcDiscoverRequest(BaseModel):
+    issuer: str = Field(min_length=8, max_length=500)
+
+
+class OidcDiscoverOut(BaseModel):
+    issuer: str
+    authorization_endpoint: str
+    token_endpoint: str
+    jwks_uri: str
+
+
+class SamlMetadataRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=500)
+
+
+class SamlMetadataOut(BaseModel):
+    saml_idp_entity_id: str
+    saml_idp_sso_url: str
+    saml_idp_x509_cert: str
 
 
 class ServiceRestartOut(BaseModel):
@@ -554,6 +734,51 @@ class AppSettingsPatch(BaseModel):
     session_ttl_minutes: int | None = Field(None, ge=5, le=10080)
     model_idle_unload_minutes: int | None = Field(None, ge=0, le=1440)
     onnx_intra_op_threads: int | None = Field(None, ge=1, le=8)
+    public_url: str | None = Field(None, max_length=500)
+    behind_proxy: bool | None = None
+    trusted_proxies: str | None = Field(None, max_length=500)
+    display_language: str | None = Field(None, max_length=32)
+    display_timezone: str | None = Field(None, max_length=64)
+    auth_rate_limit_per_minute: int | None = Field(None, ge=1, le=10000)
+    video_max_upload_bytes: int | None = Field(None, ge=1024 * 1024, le=2 * 1024 * 1024 * 1024)
+    log_max_mb: int | None = Field(None, ge=1, le=200)
+    log_backup_count: int | None = Field(None, ge=1, le=30)
+    health_detail_public: bool | None = None
+    metrics_token: str | None = Field(None, max_length=128)
+    clear_metrics_token: bool = False
+    host: str | None = Field(None, max_length=255)
+    port: int | None = Field(None, ge=1, le=65535)
+    http_enabled: bool | None = None
+    https_enabled: bool | None = None
+    https_port: int | None = Field(None, ge=1, le=65535)
+    tls_cert_file: str | None = Field(None, max_length=500)
+    tls_key_file: str | None = Field(None, max_length=500)
+    tls_cert_pem: str | None = Field(None, max_length=20000)
+    tls_key_pem: str | None = Field(None, max_length=20000)
+    models_dir: str | None = Field(None, max_length=500)
+    model_packs_dir: str | None = Field(None, max_length=500)
+    logs_dir: str | None = Field(None, max_length=500)
+    log_level: str | None = Field(None, max_length=16)
+    log_to_file: bool | None = None
+    sso_enabled: bool | None = None
+    sso_protocol: str | None = Field(None, max_length=16)
+    sso_label: str | None = Field(None, max_length=40)
+    sso_auto_provision: bool | None = None
+    sso_default_role: str | None = Field(None, max_length=16)
+    sso_link_existing: bool | None = None
+    sso_username_claim: str | None = Field(None, max_length=80)
+    oidc_issuer: str | None = Field(None, max_length=500)
+    oidc_client_id: str | None = Field(None, max_length=200)
+    oidc_client_secret: str | None = Field(None, max_length=500)
+    clear_oidc_client_secret: bool = False
+    oidc_scopes: str | None = Field(None, max_length=200)
+    oidc_groups_claim: str | None = Field(None, max_length=80)
+    saml_idp_entity_id: str | None = Field(None, max_length=500)
+    saml_idp_sso_url: str | None = Field(None, max_length=500)
+    saml_idp_x509_cert: str | None = Field(None, max_length=20000)
+    saml_sp_entity_id: str | None = Field(None, max_length=500)
+    saml_username_attr: str | None = Field(None, max_length=80)
+    saml_groups_attr: str | None = Field(None, max_length=80)
 
 
 class ModelCategoryOut(BaseModel):

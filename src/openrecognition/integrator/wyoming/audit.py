@@ -72,19 +72,21 @@ def _build_details(
         }
     if result.min_confidence is not None:
         details["min_confidence"] = result.min_confidence
+    if getattr(result, "default_min_confidence", None) is not None:
+        details["default_min_confidence"] = result.default_min_confidence
     if getattr(result, "speaker_match_attempted", False) or result.candidates is not None:
         details["speaker_match_attempted"] = True
         details["gallery_count"] = getattr(result, "gallery_count", 0)
         details["comparable_speaker_count"] = getattr(result, "comparable_speaker_count", 0)
         if getattr(result, "speaker_model_version", None):
             details["speaker_model_version"] = result.speaker_model_version
-        details["speaker_candidates"] = [
-            {
-                **row,
-                "confidence": round(float(row["confidence"]), 4),
-            }
-            for row in (result.candidates or [])
-        ]
+        saved_candidates = []
+        for row in result.candidates or []:
+            saved = {**row, "confidence": round(float(row["confidence"]), 4)}
+            if saved.get("threshold_used") is not None:
+                saved["threshold_used"] = round(float(saved["threshold_used"]), 4)
+            saved_candidates.append(saved)
+        details["speaker_candidates"] = saved_candidates
     details["accepted"] = result.accepted
     return details
 

@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import type { EnrollmentOut } from "@/types/api";
 import { canAdmin } from "@/utils/roles";
 import { useAuth } from "@/composables/useAuth";
+import { t } from "@/i18n";
 
 const show = defineModel<boolean>("show", { default: false });
 
@@ -17,17 +18,20 @@ const active = ref(0);
 
 const pages = computed(() => {
   const items = [
-    { label: "Overview", to: "/", hint: "Home" },
-    { label: "Library", to: "/enrollments", hint: "Profiles" },
-    { label: "Add someone or something", to: "/enrollments/new", hint: "New" },
-    { label: "Recognize", to: "/test", hint: "Voice, photo, or video" },
-    { label: "Activity", to: "/logs" },
-    { label: "Connections", to: "/integrations" },
-    { label: "Users", to: "/users" },
-    { label: "API keys", to: "/keys" },
-    { label: "Settings", to: "/settings" },
+    { label: t("nav.overview"), to: "/", hint: t("palette.home") },
+    { label: t("nav.library"), to: "/enrollments", hint: t("palette.profiles") },
+    { label: t("nav.new"), to: "/enrollments/new", hint: t("palette.new") },
+    { label: t("nav.recognize"), to: "/test", hint: t("palette.recognize") },
+    { label: t("nav.activity"), to: "/logs" },
+    { label: t("nav.connections"), to: "/integrations" },
+    { label: t("nav.users"), to: "/users" },
+    { label: t("nav.apiKeys"), to: "/keys" },
+    { label: t("nav.settings"), to: "/settings" },
   ];
-  if (canAdmin(role.value)) items.push({ label: "Models", to: "/models" });
+  if (canAdmin(role.value)) {
+    items.splice(items.findIndex((i) => i.to === "/keys"), 0, { label: t("nav.groups"), to: "/groups" });
+    items.push({ label: t("nav.models"), to: "/models" });
+  }
   return items;
 });
 
@@ -105,7 +109,7 @@ onMounted(() => {
     <NInput
       v-model:value="query"
       size="large"
-      placeholder="Go to a page or profile…"
+      :placeholder="t('palette.placeholder')"
       autofocus
       @keydown="onKey"
     />
@@ -122,7 +126,7 @@ onMounted(() => {
         <span>{{ hit.label }}</span>
         <span v-if="hit.hint" class="or-muted or-small">{{ hit.hint }}</span>
       </li>
-      <li v-if="!results.length" class="or-palette__empty or-muted">Nothing matches.</li>
+      <li v-if="!results.length" class="or-palette__empty or-muted">{{ t("palette.empty") }}</li>
     </ul>
   </NModal>
 </template>

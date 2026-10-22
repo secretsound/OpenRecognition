@@ -53,6 +53,10 @@ def test_list_catalog_has_the_builtin_set():
     assert "speaker_embedding" in keys
     assert "speaker_campplus" in keys
     assert "face_detector" in keys
+    face = next(r for r in rows if r["key"] == "face_detector")
+    pet = next(r for r in rows if r["key"] == "animal_detector")
+    assert face["enables"] == ["Accurate face crops before embedding"]
+    assert pet["enables"] == ["Pet/object region crops (not full-frame guess)"]
     assert "face_embedding" in keys
     assert "face_w600k_r50" in keys
     assert "animal_detector" in keys

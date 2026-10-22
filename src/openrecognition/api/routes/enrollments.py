@@ -8,8 +8,17 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile  # noqa: F401
 from PIL import Image, UnidentifiedImageError
 
-from openrecognition.api.deps import get_request_id, get_state, require_scope
-from openrecognition.api.errors import bad_request, not_found
+from openrecognition.api.deps import (
+    get_auth,
+    get_request_id,
+    get_state,
+    can_delete_enrollment,
+    library_limited_ids,
+    require_enrollment_right,
+    require_enrollment_view,
+    require_scope,
+)
+from openrecognition.api.errors import bad_request, forbidden, not_found
 from openrecognition.app_state import AppState
 from openrecognition.gallery.sample_meta import SampleMeta, parse_sample_meta_form
 from openrecognition.inference.video_demux import VideoDecodeError, is_video_container
@@ -355,6 +364,7 @@ async def create_enrollment(
         species_hint,
         threshold,
         _form_bool(enabled),
+        created_by=auth.get("user_id") if auth else None,
     )
     quality, dup = None, None
     if files:
@@ -381,9 +391,12 @@ def list_enrollments(
     type: str | None = Query(None, description="Filter by enrollment type"),
     q: str | None = Query(None, description="Case-insensitive name search"),
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("read")),
+    auth=Depends(require_scope("read")),
 ):
     rows = state.gallery.list_enrollments(type, q=q)
+    allowed = library_limited_ids(state, auth)
+    if allowed is not None:
+        rows = [e for e in rows if e["id"] in allowed]
     quality = state.gallery.evaluate_many(rows)
     seen = state.gallery.presence_map()
     return [_to_out(e, quality.get(e["id"]), last_seen=seen.get(e["id"])) for e in rows]
@@ -393,8 +406,9 @@ def list_enrollments(
 def get_enrollment(
     enrollment_id: str,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("read")),
+    auth=Depends(require_scope("read")),
 ):
+    require_enrollment_view(state, auth, enrollment_id)
     en = state.gallery.get_enrollment(enrollment_id)
     if not en:
         raise not_found("Enrollment not found")
@@ -410,8 +424,9 @@ def patch_enrollment(
     enrollment_id: str,
     body: EnrollmentPatch,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("enroll")),
+    auth=Depends(get_auth),
 ):
+    require_enrollment_right(state, auth, enrollment_id, "manage")
     updates = body.model_dump(exclude_unset=True)
     if "label" in updates:
         label = str(updates.get("label") or "").strip()
@@ -433,8 +448,11 @@ def delete_enrollment(
     enrollment_id: str,
     purge_media: bool = False,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("enroll")),
+    auth=Depends(require_scope("enroll")),
 ):
+    require_enrollment_view(state, auth, enrollment_id)
+    if not can_delete_enrollment(state, auth, enrollment_id):
+        raise forbidden("You can only delete enrollments you created")
     if not state.gallery.delete_enrollment(enrollment_id, purge_media=purge_media):
         raise not_found("Enrollment not found")
 
@@ -443,8 +461,9 @@ def delete_enrollment(
 def list_samples(
     enrollment_id: str,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("read")),
+    auth=Depends(require_scope("read")),
 ):
+    require_enrollment_view(state, auth, enrollment_id)
     if not state.gallery.get_enrollment(enrollment_id):
         raise not_found("Enrollment not found")
     return state.gallery.list_samples(enrollment_id)
@@ -455,8 +474,9 @@ def delete_sample(
     enrollment_id: str,
     sample_id: str,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("enroll")),
+    auth=Depends(get_auth),
 ):
+    require_enrollment_right(state, auth, enrollment_id, "manage")
     row = state.gallery.db.fetchone(
         "SELECT enrollment_id FROM embeddings WHERE id = ?",
         (sample_id,),
@@ -645,9 +665,10 @@ def _preview_image(
 async def preview_sample(
     enrollment_id: str,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("enroll")),
+    auth=Depends(get_auth),
     file: UploadFile = File(...),
 ):
+    require_enrollment_right(state, auth, enrollment_id, "add_samples")
     en = state.gallery.get_enrollment(enrollment_id)
     if not en:
         raise not_found("Enrollment not found")
@@ -666,11 +687,12 @@ async def preview_sample(
 async def add_samples(
     enrollment_id: str,
     state: AppState = Depends(get_state),
-    auth=Depends(require_scope("enroll")),
+    auth=Depends(get_auth),
     files: list[UploadFile] = File(...),
     sample_meta: str | None = Form(None),
     video_modalities: str | None = Form(None),
 ):
+    require_enrollment_right(state, auth, enrollment_id, "add_samples")
     en = state.gallery.get_enrollment(enrollment_id)
     if not en:
         raise not_found("Enrollment not found")
@@ -703,8 +725,9 @@ async def add_samples(
 def evaluate_enrollment(
     enrollment_id: str,
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("read")),
+    auth=Depends(require_scope("read")),
 ):
+    require_enrollment_view(state, auth, enrollment_id)
     en = state.gallery.get_enrollment(enrollment_id)
     if not en:
         raise not_found("Enrollment not found")

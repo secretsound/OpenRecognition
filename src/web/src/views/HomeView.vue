@@ -13,6 +13,7 @@ import Chip from "@/components/kit/Chip.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import StatusPill from "@/components/StatusPill.vue";
 import TypeTag from "@/components/TypeTag.vue";
+import { spokenText } from "@/utils/activityStory";
 import { verdictFromLog } from "@/utils/verdict";
 import { canWrite } from "@/utils/roles";
 import { useAuth } from "@/composables/useAuth";
@@ -67,6 +68,26 @@ const setup = computed(() => {
 });
 
 const setupOpen = computed(() => setup.value.some((s) => !s.done));
+
+function timingTail(summary: string | null | undefined): string {
+  if (!summary) return "";
+  const mark = summary.match(/ · (audio [\d.]+s(?: · .+)?)$/);
+  return mark?.[1] ?? "";
+}
+
+function spokenFromSummary(summary: string | null | undefined): string {
+  if (!summary) return "";
+  const quoted = summary.match(/^"([\s\S]+)"(?: · |$)/);
+  return spokenText(quoted?.[1] ?? "");
+}
+
+/** Front page shows what was said, not the Wyoming packet sent to Home Assistant. */
+function activitySentence(row: RecognitionLogOut): string {
+  const spoken = spokenText(row.details?.transcript) || spokenFromSummary(row.summary);
+  if (!spoken) return verdictFromLog(row).sentence;
+  const timing = timingTail(row.summary);
+  return timing ? `${spoken} · ${timing}` : spoken;
+}
 
 function applyOverview(data: ConsoleOverviewOut) {
   enrollments.value = data.enrollments;
@@ -231,7 +252,7 @@ onMounted(load);
             <button type="button" class="activity__row" @click="router.push('/logs')">
               <ProfileMark :label="row.label || 'Event'" size="sm" />
               <span class="activity__copy">
-                <span>{{ verdictFromLog(row).sentence }}</span>
+                <span>{{ activitySentence(row) }}</span>
                 <span class="activity__meta">
                   <Chip v-if="row.dry_run">Practice</Chip>
                   <TimeAgo :value="row.created_at" />

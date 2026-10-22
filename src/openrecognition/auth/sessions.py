@@ -1,6 +1,7 @@
 """Web UI session and local user accounts."""
 
 import secrets
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -62,6 +63,7 @@ class SessionService:
     def __init__(self, db: Database, ttl_minutes: int = 60):
         self.db = db
         self.ttl_minutes = ttl_minutes
+        self.groups = None
 
     def ensure_default_admin(
         self, username: str = "admin", password: str | None = None
@@ -111,10 +113,74 @@ class SessionService:
         return self.db.fetchone("SELECT id FROM users LIMIT 1") is not None
 
     def count_admins(self) -> int:
+        if self.groups is not None:
+            return self.groups.count_effective_admins()
         row = self.db.fetchone(
             "SELECT COUNT(*) as c FROM users WHERE role = ?", ("admin",)
         )
         return int(row["c"]) if row else 0
+
+    def effective_role(self, user_id: str, base_role: str) -> str:
+        if self.groups is not None:
+            return self.groups.effective_role(user_id, base_role)
+        return base_role if base_role in VALID_ROLES else "viewer"
+
+    def provision_sso_user(
+        self,
+        *,
+        username: str,
+        subject: str,
+        protocol: str,
+        role: str,
+        link_existing: bool,
+        auto_provision: bool,
+    ) -> dict[str, Any]:
+        if role not in VALID_ROLES:
+            role = "viewer"
+        if not subject:
+            raise ValueError("Missing identity")
+        linked = self.db.fetchone(
+            "SELECT id, username, role FROM users WHERE sso_subject = ?",
+            (subject,),
+        )
+        if linked is None and link_existing:
+            by_name = self.db.fetchone(
+                "SELECT id, username, role, sso_subject FROM users WHERE username = ?",
+                (username,),
+            )
+            if by_name is not None:
+                existing_subject = by_name["sso_subject"]
+                if existing_subject and existing_subject != subject:
+                    raise ValueError("Username is linked to a different identity")
+                self.db.execute(
+                    "UPDATE users SET sso_subject = ?, sso_protocol = ? WHERE id = ?",
+                    (subject, protocol, by_name["id"]),
+                )
+                linked = by_name
+        if linked is None:
+            if not auto_provision:
+                raise ValueError("No account on this server matches that identity")
+            uid = str(uuid.uuid4())
+            created_at = _now_iso()
+            try:
+                self.db.execute(
+                    """INSERT INTO users
+                       (id, username, password_hash, role, created_at, sso_subject, sso_protocol)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        uid,
+                        username,
+                        _hash_password(secrets.token_urlsafe(24)),
+                        role,
+                        created_at,
+                        subject,
+                        protocol,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("Username is linked to a different identity") from exc
+            return {"id": uid, "username": username, "role": role, "created_at": created_at}
+        return {"id": linked["id"], "username": linked["username"], "role": linked["role"]}
 
     def create_user(self, username: str, password: str, role: str) -> dict[str, Any]:
         if role not in VALID_ROLES:
@@ -144,7 +210,12 @@ class SessionService:
         if role is not None:
             if role not in VALID_ROLES:
                 raise ValueError(f"Invalid role: {role}")
-            if user["role"] == "admin" and role != "admin" and self.count_admins() <= 1:
+            next_effective = self.effective_role(user_id, role)
+            if (
+                self.effective_role(user_id, user["role"]) == "admin"
+                and next_effective != "admin"
+                and self.count_admins() <= 1
+            ):
                 raise ValueError("Cannot remove the last admin user")
             self.db.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
             user["role"] = role
@@ -162,7 +233,7 @@ class SessionService:
             return False
         if actor_user_id and user_id == actor_user_id:
             raise ValueError("Cannot delete your own account")
-        if user["role"] == "admin" and self.count_admins() <= 1:
+        if self.effective_role(user_id, user["role"]) == "admin" and self.count_admins() <= 1:
             raise ValueError("Cannot delete the last admin user")
         self.delete_sessions_for_user(user_id)
         self.db.execute("DELETE FROM users WHERE id = ?", (user_id,))
@@ -205,12 +276,14 @@ class SessionService:
         user = self.db.fetchone("SELECT * FROM users WHERE id = ?", (row["user_id"],))
         if not user:
             return None
-        scopes = ROLE_SCOPES.get(user["role"], ["read"])
+        role = self.effective_role(user["id"], user["role"])
+        scopes = ROLE_SCOPES.get(role, ["read"])
         return {
             "session_id": session_id,
             "user_id": user["id"],
             "username": user["username"],
-            "role": user["role"],
+            "role": role,
+            "base_role": user["role"],
             "scopes": scopes,
         }
 

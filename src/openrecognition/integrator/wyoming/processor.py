@@ -24,10 +24,12 @@ class UtteranceResult:
     gate_scores: dict[str, float] | None = None
     candidates: list[dict[str, Any]] | None = None
     min_confidence: float | None = None
+    default_min_confidence: float | None = None
     speaker_match_attempted: bool = False
     speaker_model_version: str | None = None
     gallery_count: int = 0
     comparable_speaker_count: int = 0
+    sound_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _candidate_rows(candidates: list[dict[str, Any]], *, min_confidence: float) -> list[dict[str, Any]]:
@@ -39,14 +41,16 @@ def _candidate_rows(candidates: list[dict[str, Any]], *, min_confidence: float) 
             accepted = bool(item["accepted"]) and label not in ("unknown", "")
         else:
             accepted = label not in ("unknown", "") and confidence >= min_confidence
-        rows.append(
-            {
-                "label": label,
-                "entity_id": item.get("entity_id"),
-                "confidence": confidence,
-                "accepted": accepted,
-            }
-        )
+        row: dict[str, Any] = {
+            "label": label,
+            "entity_id": item.get("entity_id"),
+            "confidence": confidence,
+            "accepted": accepted,
+        }
+        used = item.get("threshold_used")
+        if used is not None:
+            row["threshold_used"] = float(used)
+        rows.append(row)
     return rows
 
 
@@ -78,6 +82,7 @@ def _speaker_match(
             comparable_speaker_count=0,
             speaker_match_attempted=True,
             min_confidence=min_confidence,
+            default_min_confidence=min_confidence,
             candidates=[],
         )
 
@@ -100,6 +105,7 @@ def _speaker_match(
         "gate": gate,
         "candidates": candidate_rows,
         "min_confidence": min_confidence,
+        "default_min_confidence": min_confidence,
         "speaker_match_attempted": True,
         "gallery_count": gallery_count,
         "comparable_speaker_count": comparable_count,
@@ -194,6 +200,7 @@ def identify_wav(
     scores: dict[str, float] | None,
     *,
     min_confidence: float,
+    include_sound_events: bool = False,
 ) -> UtteranceResult:
     """Speaker match for audio that has already been gated."""
     speaker = _speaker_match(state, wav, min_confidence=min_confidence, gate=gate)
@@ -201,6 +208,12 @@ def identify_wav(
     if gate != "accept":
         speaker.reason = reason
         speaker.accepted = False
+    if include_sound_events:
+        from openrecognition.inference.sound_events import classify_sound_events, wyoming_sound_rows
+
+        policy = getattr(state, "inference_policy", None)
+        session = policy.get_session("audio_gate_classifier") if policy is not None else None
+        speaker.sound_events = wyoming_sound_rows(classify_sound_events(wav, session=session))
     return speaker
 
 
@@ -213,6 +226,7 @@ def process_utterance(
     *,
     min_confidence: float,
     block_on_gate_reject: bool = True,
+    include_sound_events: bool = False,
 ) -> UtteranceResult:
     """Run audio gate and speaker match on PCM (same logic as /v1/recognize/audio identify)."""
     del block_on_gate_reject  # handler owns upstream blocking; always identify for logs
@@ -224,4 +238,5 @@ def process_utterance(
         gated.reason,
         gated.scores,
         min_confidence=min_confidence,
+        include_sound_events=include_sound_events,
     )

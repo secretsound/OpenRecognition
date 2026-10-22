@@ -68,6 +68,7 @@ class SpeakerProxyHandler(AsyncEventHandler):
         tag_speaker: bool = True,
         include_confidence: bool = True,
         include_candidates: bool = False,
+        include_sound_events: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -80,6 +81,7 @@ class SpeakerProxyHandler(AsyncEventHandler):
         self._tag_speaker = tag_speaker
         self._include_confidence = include_confidence
         self._include_candidates = include_candidates
+        self._include_sound_events = include_sound_events
 
         self._pcm = bytearray()
         self._rate = 16000
@@ -128,6 +130,10 @@ class SpeakerProxyHandler(AsyncEventHandler):
     def include_candidates(self) -> bool:
         return self._live_bool("include_candidates", self._include_candidates)
 
+    @property
+    def include_sound_events(self) -> bool:
+        return self._live_bool("include_sound_events", self._include_sound_events)
+
     def _reset_stream(self) -> None:
         self._pcm = bytearray()
         self._timestamp_ms = None
@@ -158,15 +164,18 @@ class SpeakerProxyHandler(AsyncEventHandler):
         return wyoming_transcript_context(details)
 
     def _format_text(self, text: str, result: UtteranceResult) -> str:
-        speaker = result.label if result.accepted and result.label else None
+        matched = bool(result.accepted and result.label)
+        speaker = result.label if matched else None
         return format_transcript_message(
             text,
             speaker=speaker,
-            confidence=result.confidence,
+            confidence=result.confidence if matched else None,
             candidates=result.candidates,
+            sound_events=result.sound_events,
             tag_speaker=self.tag_speaker,
             include_confidence=self.include_confidence,
             include_candidates=self.include_candidates,
+            include_sound_events=self.include_sound_events,
         )
 
     @staticmethod
@@ -365,6 +374,7 @@ class SpeakerProxyHandler(AsyncEventHandler):
                         gated.reason,
                         gated.scores,
                         min_confidence=self.min_confidence,
+                        include_sound_events=self.include_sound_events,
                     ),
                 )
         except BaseException:

@@ -1,23 +1,15 @@
-"""Entry point for uvicorn."""
+"""Entry point for the API server."""
 
-import logging
-
-import uvicorn
-
+from openrecognition.boot_settings import apply_boot_overrides
 from openrecognition.config import settings
-from openrecognition.logging_config import configure_logging
+from openrecognition.logging_config import apply_runtime_logging
+from openrecognition.server import serve
 
 
 def run():
-    configure_logging(logging.INFO)
-    uvicorn.run(
-        "openrecognition.api.app:create_app",
-        factory=True,
-        host=settings.host,
-        port=settings.port,
-        reload=False,
-        log_level="info",
-    )
+    apply_boot_overrides(settings)
+    apply_runtime_logging(settings)
+    serve(settings)
 
 
 if __name__ == "__main__":

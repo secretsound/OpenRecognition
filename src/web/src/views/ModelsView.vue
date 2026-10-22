@@ -77,6 +77,21 @@ const sectionTabs: { value: ModelSection; label: string }[] = [
   { value: "settings", label: "Settings" },
 ];
 
+const categoryBenefits: Record<string, string> = {
+  speech_check:
+    "Music, silence, and background noise stop here, so speaker matching only runs on speech.",
+  voice_match:
+    "Voice enrollments, audio recognition, and Wyoming use this model to name the speaker.",
+  skip_reasons:
+    "A skipped clip can say music, silence, or noise, which makes the gate easier to tune.",
+  find_face:
+    "The face is cropped out of the photo first, so matching holds up better in groups and busy rooms.",
+  match_face: "Photo enrollments and image recognition use this model to name the person.",
+  find_pet:
+    "The pet or object is cropped out of the photo first, instead of guessing from the whole frame.",
+  match_pet: "Pet and object enrollments and image recognition use this model to name what was found.",
+};
+
 const settingLabels: Record<string, string> = {
   embed_dim: "Embedding size",
   input_size: "Input size",
@@ -96,6 +111,8 @@ const inferenceOptions: SelectOption[] = [
 ];
 
 const statusOptions: SelectOption[] = [
+  { label: "In use", value: "active" },
+  { label: "Still matching", value: "kept" },
   { label: "Ready", value: "ready" },
   { label: "Not downloaded", value: "missing" },
 ];
@@ -173,7 +190,14 @@ const filteredRows = computed(() => {
   const query = search.value.trim().toLowerCase();
   if (query) {
     list = list.filter((row) =>
-      [modelTitle(row), row.version || "", row.use_for, categoryLabel(row.category), machineLabel(row.hardware || "")]
+      [
+        modelTitle(row),
+        row.version || "",
+        row.use_for,
+        enableLines(row).join(" "),
+        categoryLabel(row.category),
+        machineLabel(row.hardware || ""),
+      ]
         .join(" ")
         .toLowerCase()
         .includes(query),
@@ -182,6 +206,8 @@ const filteredRows = computed(() => {
   if (groupFilter.value) list = list.filter((row) => row.category === groupFilter.value);
   if (statusFilter.value === "ready") list = list.filter((row) => row.on_disk);
   if (statusFilter.value === "missing") list = list.filter((row) => !row.on_disk);
+  if (statusFilter.value === "active") list = list.filter((row) => row.active);
+  if (statusFilter.value === "kept") list = list.filter((row) => !row.active && keptCount(row) > 0);
   return [...list].sort(
     (a, b) =>
       categoryOrder(a.category) - categoryOrder(b.category) ||
@@ -201,6 +227,35 @@ function clearFilters() {
   search.value = "";
   groupFilter.value = null;
   statusFilter.value = null;
+}
+
+const categoryCards = computed(() =>
+  [...(status.value?.categories ?? [])]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((category) => {
+      const rows = (status.value?.catalog ?? []).filter((row) => row.category === category.id);
+      const downloadCount = rows.filter((row) => row.on_disk).length;
+      return {
+        id: category.id,
+        label: category.label,
+        summary: category.description,
+        benefit: categoryBenefits[category.id] ?? "",
+        downloaded: downloadCount > 0,
+        downloadCount,
+      };
+    }),
+);
+
+function categoryStatus(card: { downloaded: boolean; downloadCount: number }): string {
+  if (!card.downloaded) return "Not downloaded";
+  return card.downloadCount === 1 ? "1 model downloaded" : `${card.downloadCount} models downloaded`;
+}
+
+function showCategory(id: string) {
+  groupFilter.value = id;
+  statusFilter.value = null;
+  search.value = "";
+  sectionTab.value = "catalog";
 }
 
 const recommendedRows = computed(() => {
@@ -229,10 +284,11 @@ const modelCountLabel = computed(() => {
   if (matched !== total) return `${shown} of ${total} ${noun}`;
   return `${shown} ${noun}`;
 });
+const ROW_HEIGHT = 96;
 const tableHeight = computed(() => {
   // Shorter than the first page of rows, so the table body scrolls and can load more.
-  const visible = Math.min(Math.max(tableRows.value.length, 1), 8);
-  return visible * 64 + 48;
+  const visible = Math.min(Math.max(tableRows.value.length, 1), 6);
+  return visible * ROW_HEIGHT + 48;
 });
 
 watch(filteredRows, () => {
@@ -310,6 +366,12 @@ function enableLines(row: ModelCatalogEntry): string[] {
   const items = row.enables ?? [];
   if (items.length > 1 && items.every((item) => item.length <= 1)) return [items.join("")];
   return items;
+}
+
+function modelRowClass(row: ModelCatalogEntry): string {
+  if (row.active) return "is-active-row";
+  if (keptCount(row) > 0) return "is-kept-row";
+  return "";
 }
 
 function applyStatus(next: ModelsStatusOut) {
@@ -717,31 +779,20 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Model",
     key: "label",
-    minWidth: 140,
+    minWidth: 200,
     sorter: (a, b) => modelTitle(a).localeCompare(modelTitle(b)),
     render(row) {
-      return h("div", { class: "name-line" }, [
+      return h("div", { class: "model-cell" }, [
         h("strong", modelTitle(row)),
-        row.active
-          ? h(NTag, { size: "small", round: true, bordered: false, type: "success" }, { default: () => "In use" })
-          : null,
-        !row.active && keptCount(row) > 0
-          ? h(
-              NTag,
-              { size: "small", round: true, bordered: false, type: "warning" },
-              { default: () => `Still matching ${keptCount(row)}` },
-            )
-          : null,
-        fitLabel(row)
-          ? h(NTag, { size: "small", round: true, bordered: false }, { default: () => fitLabel(row) })
-          : null,
+        h("div", { class: ["usage-state", usageClass(row)] }, usageText(row)),
+        h("div", { class: "cell-meta" }, row.use_for),
       ]);
     },
   },
   {
     title: "Category",
     key: "category",
-    minWidth: 120,
+    width: 124,
     sorter: (a, b) => categoryLabel(a.category).localeCompare(categoryLabel(b.category)),
     render(row) {
       return categoryLabel(row.category);
@@ -750,30 +801,10 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Version",
     key: "version",
-    width: 148,
-    ellipsis: { tooltip: true },
+    minWidth: 168,
     sorter: (a, b) => (a.version || "").localeCompare(b.version || ""),
     render(row) {
-      return row.version || "—";
-    },
-  },
-  {
-    title: "Used for",
-    key: "use_for",
-    minWidth: 160,
-    render(row) {
-      const deps = missingDeps(row);
-      return h("div", [
-        h("div", row.use_for),
-        row.hardware_note ? h("div", { class: "cell-meta" }, row.hardware_note) : null,
-        deps.length
-          ? h(
-              "div",
-              { class: "cell-warn" },
-              `Also download ${deps.map((key) => catalogByKey.value.get(key)?.label || key).join(", ")}.`,
-            )
-          : null,
-      ]);
+      return h("span", { class: "version-cell" }, row.version || "—");
     },
   },
   {
@@ -781,7 +812,20 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
     key: "hardware",
     width: 128,
     render(row) {
-      return machineLabel(row.hardware || "");
+      const note = fitLabel(row);
+      return h("div", { class: "model-cell", title: row.hardware_note || undefined }, [
+        h("div", machineLabel(row.hardware || "")),
+        note ? h("div", { class: "cell-meta" }, note) : null,
+        missingDeps(row).length
+          ? h(
+              "div",
+              { class: "cell-warn" },
+              `Also download ${missingDeps(row)
+                .map((key) => catalogByKey.value.get(key)?.label || key)
+                .join(", ")}.`,
+            )
+          : null,
+      ]);
     },
   },
   {
@@ -795,7 +839,8 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "",
     key: "actions",
-    width: 252,
+    width: 240,
+    className: "actions-cell",
     render(row) {
       const actions: VNode[] = [];
       if (!row.active) {
@@ -959,12 +1004,6 @@ onMounted(() => {
             <p class="hint">{{ row.use_for }}</p>
             <p class="meta-label">Version</p>
             <p class="cell-meta">{{ row.version || "—" }}</p>
-            <template v-if="row.enables.length">
-              <p class="meta-label">Enables</p>
-              <ul class="enable-list">
-                <li v-for="item in row.enables" :key="item">{{ item }}</li>
-              </ul>
-            </template>
             <p v-if="row.on_disk && formatBytes(row.size_bytes)" class="cell-meta">{{ formatBytes(row.size_bytes) }}</p>
             <div class="row-actions">
               <NButton v-if="!row.active" size="small" :loading="usingKey === row.key" @click="requestUse(row)">
@@ -1015,22 +1054,23 @@ onMounted(() => {
 
       <template v-else>
         <div class="or-list-cards model-card-scroll" @scroll="onTableScroll">
-          <article v-for="row in tableRows" :key="row.key" class="or-list-card model-card">
+          <article
+            v-for="row in tableRows"
+            :key="row.key"
+            class="or-list-card model-card"
+            :class="{ 'is-active': row.active, 'is-kept': !row.active && keptCount(row) > 0 }"
+          >
             <div class="model-card-copy">
-              <span class="or-list-card__title">
-                {{ modelTitle(row) }}
-                <NTag v-if="row.active" size="small" round :bordered="false" type="success">In use</NTag>
-                <NTag v-else-if="keptCount(row) > 0" size="small" round :bordered="false" type="warning">
-                  Still matching {{ keptCount(row) }}
-                </NTag>
-                <NTag v-if="fitLabel(row)" size="small" round :bordered="false">{{ fitLabel(row) }}</NTag>
-              </span>
+              <span class="or-list-card__title">{{ modelTitle(row) }}</span>
+              <p class="usage-state" :class="usageClass(row)">{{ usageText(row) }}</p>
               <span class="or-list-card__meta">
                 <span>{{ categoryLabel(row.category) }}</span>
                 <span>{{ machineLabel(row.hardware || "") }}</span>
-                <span>{{ row.version || "—" }}</span>
+                <span v-if="fitLabel(row)">{{ fitLabel(row) }}</span>
                 <span :class="{ 'is-ready': row.on_disk }">{{ statusText(row) }}</span>
               </span>
+              <p class="meta-label">Version</p>
+              <p class="cell-meta">{{ row.version || "—" }}</p>
               <p>{{ row.use_for }}</p>
             </div>
             <div class="row-actions">
@@ -1070,7 +1110,8 @@ onMounted(() => {
             flex-height
             virtual-scroll
             :header-height="44"
-            :min-row-height="64"
+            :min-row-height="ROW_HEIGHT"
+            :row-class-name="modelRowClass"
             size="medium"
             :row-key="(row: ModelCatalogEntry) => row.key"
           />
@@ -1083,6 +1124,29 @@ onMounted(() => {
       </section>
 
       <section v-if="sectionTab === 'settings'" class="models-section">
+        <h3 class="subhead">Categories</h3>
+        <p class="hint">
+          Each kind of recognition needs its own model. Download one file for a category and it can do that job.
+        </p>
+        <div class="recommend-grid">
+          <article
+            v-for="card in categoryCards"
+            :key="card.id"
+            class="recommend-card"
+            :class="{ 'is-active': card.downloaded }"
+          >
+            <p class="recommend-kicker">{{ card.label }}</p>
+            <p class="usage-state" :class="{ 'is-active-copy': card.downloaded }">
+              {{ categoryStatus(card) }}
+            </p>
+            <p class="hint">{{ card.summary }}</p>
+            <p v-if="card.benefit" class="cell-meta">{{ card.benefit }}</p>
+            <div class="row-actions">
+              <NButton size="small" @click="showCategory(card.id)">See models</NButton>
+            </div>
+          </article>
+        </div>
+
         <h3 class="subhead">How matching runs</h3>
         <p class="hint">
           Automatic uses a downloaded file when you have one, and a simple built-in guess when you do not.
@@ -1308,17 +1372,6 @@ onMounted(() => {
   color: var(--n-text-color-3);
 }
 
-.enable-list {
-  margin: 0;
-  padding-left: 1.1rem;
-  color: var(--n-text-color-2);
-  font-size: 0.875rem;
-}
-
-.enable-list li + li {
-  margin-top: 2px;
-}
-
 .recommend-kicker {
   margin: 0;
   font-size: 0.75rem;
@@ -1329,6 +1382,52 @@ onMounted(() => {
 
 .models-table :deep(.n-data-table) {
   height: 100%;
+}
+
+.models-table :deep(.n-data-table-td) {
+  vertical-align: top;
+}
+
+.models-table :deep(.actions-cell) {
+  vertical-align: bottom;
+}
+
+.models-table :deep(.is-active-row .n-data-table-td:first-child) {
+  box-shadow: inset 3px 0 0 var(--or-success);
+}
+
+.models-table :deep(.is-kept-row .n-data-table-td:first-child) {
+  box-shadow: inset 3px 0 0 var(--or-warning);
+}
+
+.models-page :deep(.model-cell) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.models-page :deep(.version-cell) {
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.model-card.is-active {
+  border-color: color-mix(in oklab, var(--or-success) 55%, var(--or-line));
+}
+
+.model-card.is-kept {
+  border-color: color-mix(in oklab, var(--or-warning) 55%, var(--or-line));
+}
+
+.model-card .row-actions {
+  margin-top: auto;
+}
+
+.model-card .meta-label {
+  margin-top: 6px;
 }
 
 .model-card-scroll {

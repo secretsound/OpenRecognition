@@ -82,6 +82,32 @@ def test_format_transcript_candidates_only():
     assert text == "hello"
 
 
+def test_format_transcript_includes_everyone_who_passed():
+    out = format_transcript_message(
+        "Can you tell who's talking right now?",
+        speaker="test",
+        confidence=0.56,
+        candidates=[
+            {"label": "test", "confidence": 0.56, "accepted": True},
+            {"label": "Luke", "confidence": 0.49, "accepted": True},
+            {"label": "Nova", "confidence": 0.2, "accepted": False},
+        ],
+        tag_speaker=True,
+        include_confidence=True,
+    )
+    assert out == (
+        "[speaker|confidence]\n"
+        "test: 56%\n"
+        "Luke: 49%\n"
+        "\n"
+        "[transcript]\n"
+        "Can you tell who's talking right now?"
+    )
+    speaker, text = parse_speaker_tag(out)
+    assert speaker == "test"
+    assert text == "Can you tell who's talking right now?"
+
+
 def test_format_transcript_speaker_only():
     out = format_transcript_message(
         "hello",
@@ -89,6 +115,17 @@ def test_format_transcript_speaker_only():
         tag_speaker=True,
     )
     assert out == "[speaker]\nLuke\n\n[transcript]\nhello"
+
+
+def test_format_transcript_skips_confidence_when_nobody_matches():
+    out = format_transcript_message(
+        "What's the weather tomorrow?",
+        speaker=None,
+        confidence=0.49,
+        include_confidence=True,
+        tag_speaker=True,
+    )
+    assert out == "What's the weather tomorrow?"
 
 
 def test_format_transcript_confidence_only():
@@ -103,3 +140,42 @@ def test_format_transcript_confidence_only():
 
 def test_format_transcript_unchanged_without_toggles():
     assert format_transcript_message("hello", speaker="Luke", confidence=0.9) == "hello"
+
+
+def test_format_transcript_includes_sound_events():
+    out = format_transcript_message(
+        "turn on the kitchen lights",
+        speaker="Luke",
+        confidence=0.92,
+        sound_events=[
+            {"label": "bark", "confidence": 0.81},
+            {"label": "glass break", "confidence": 0.44},
+            {"label": "speech", "confidence": 0.9},
+        ],
+        tag_speaker=True,
+        include_confidence=True,
+        include_sound_events=True,
+    )
+    assert out == (
+        "[speaker|confidence]\n"
+        "Luke: 92%\n"
+        "\n"
+        "[sounds]\n"
+        "bark: 81%\n"
+        "glass break: 44%\n"
+        "\n"
+        "[transcript]\n"
+        "turn on the kitchen lights"
+    )
+    speaker, text = parse_speaker_tag(out)
+    assert speaker == "Luke"
+    assert text == "turn on the kitchen lights"
+
+
+def test_format_transcript_sounds_only():
+    out = format_transcript_message(
+        "hello",
+        sound_events=[{"label": "doorbell", "confidence": 0.7}],
+        include_sound_events=True,
+    )
+    assert out == "[sounds]\ndoorbell\n\n[transcript]\nhello"

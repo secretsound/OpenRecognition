@@ -4,7 +4,10 @@ When extras are enabled the packet looks like::
 
     [speaker|confidence]
     Luke: 92%
-    Ada: 41%
+
+    [sounds]
+    bark: 81%
+    glass break: 44%
 
     [transcript]
     turn on the kitchen lights
@@ -25,6 +28,7 @@ SPEAKER_TAG_RE = re.compile(
 )
 SPEAKER_SECTION_RE = re.compile(r"^\[speaker(?:\|[^\]]*)?\]\s*$", re.IGNORECASE)
 TRANSCRIPT_MARK = "[transcript]"
+SOUNDS_MARK = "[sounds]"
 TRANSCRIPT_MARK_RE = re.compile(r"^\[transcript\]\s*", re.IGNORECASE | re.MULTILINE)
 
 
@@ -98,15 +102,53 @@ def _person_row(label: str, confidence: Any, *, include_confidence: bool) -> str
     return f"{label}: {pct}" if pct else label
 
 
+def _named_candidates(candidates: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in candidates or []:
+        label = str(item.get("label") or "").strip()
+        if not label or label.lower() == "unknown":
+            continue
+        rows.append(item)
+    return rows
+
+
+def _passed_candidates(
+    candidates: list[dict[str, Any]] | None,
+    speaker: str | None,
+) -> list[dict[str, Any]]:
+    """People who cleared their own bar, with the chosen speaker first."""
+    passed = [item for item in _named_candidates(candidates) if item.get("accepted") is True]
+    primary = (speaker or "").strip().lower()
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, float]:
+        label = str(item.get("label") or "").strip().lower()
+        score = float(item.get("confidence") or 0.0)
+        return (0 if primary and label == primary else 1, -score)
+
+    passed.sort(key=sort_key)
+    return passed
+
+
 def _candidate_rows(
     candidates: list[dict[str, Any]] | None,
     *,
     include_confidence: bool,
 ) -> list[str]:
+    return [
+        _person_row(str(item.get("label")), item.get("confidence"), include_confidence=include_confidence)
+        for item in _named_candidates(candidates)
+    ]
+
+
+def _sound_rows(
+    events: list[dict[str, Any]] | None,
+    *,
+    include_confidence: bool,
+) -> list[str]:
     rows: list[str] = []
-    for item in candidates or []:
+    for item in events or []:
         label = str(item.get("label") or "").strip()
-        if not label or label.lower() == "unknown":
+        if not label or label.lower() == "speech":
             continue
         rows.append(_person_row(label, item.get("confidence"), include_confidence=include_confidence))
     return rows
@@ -118,34 +160,52 @@ def format_transcript_message(
     speaker: str | None = None,
     confidence: float | None = None,
     candidates: list[dict[str, Any]] | None = None,
+    sound_events: list[dict[str, Any]] | None = None,
     tag_speaker: bool = False,
     include_confidence: bool = False,
     include_candidates: bool = False,
+    include_sound_events: bool = False,
 ) -> str:
-    """Put a speaker block first, then ``[transcript]`` and the STT text."""
+    """Put speaker and sound blocks first, then ``[transcript]`` and the STT text."""
     rows: list[str] = []
     if include_candidates:
         rows = _candidate_rows(candidates, include_confidence=include_confidence)
-    elif tag_speaker and speaker:
-        rows.append(_person_row(speaker, confidence, include_confidence=include_confidence))
-    elif include_confidence:
+    elif tag_speaker:
+        # Everyone who cleared their own bar belongs in the transcript, not only the top score.
+        passed = _passed_candidates(candidates, speaker)
+        if passed:
+            rows = [
+                _person_row(str(item.get("label")), item.get("confidence"), include_confidence=include_confidence)
+                for item in passed
+            ]
+        elif speaker:
+            rows.append(_person_row(speaker, confidence, include_confidence=include_confidence))
+    elif include_confidence and speaker:
         pct = _pct(confidence)
         if pct:
             rows.append(pct)
 
-    if not rows:
+    blocks: list[list[str]] = []
+    if rows:
+        named = bool(include_candidates or (tag_speaker and (speaker or rows)))
+        if named and include_confidence:
+            title = "[speaker|confidence]"
+        elif named:
+            title = "[speaker]"
+        else:
+            title = "[confidence]"
+        blocks.append([title, *rows])
+
+    if include_sound_events:
+        sounds = _sound_rows(sound_events, include_confidence=include_confidence)
+        if sounds:
+            blocks.append([SOUNDS_MARK, *sounds])
+
+    if not blocks:
         return text
 
-    named = bool(include_candidates or (tag_speaker and speaker))
-    if named and include_confidence:
-        title = "[speaker|confidence]"
-    elif named:
-        title = "[speaker]"
-    else:
-        title = "[confidence]"
-
-    header = [title, *rows]
+    header = "\n\n".join("\n".join(block) for block in blocks)
     body = text.strip()
     if not body:
-        return "\n".join(header)
-    return "\n".join(header) + "\n\n" + TRANSCRIPT_MARK + "\n" + body
+        return header
+    return header + "\n\n" + TRANSCRIPT_MARK + "\n" + body

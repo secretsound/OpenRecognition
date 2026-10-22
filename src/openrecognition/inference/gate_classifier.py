@@ -80,19 +80,29 @@ def _bucket_scores(frame_scores: np.ndarray) -> dict[str, float]:
     }
 
 
-def classify_yamnet(session: Any, audio: np.ndarray, sr: int) -> dict[str, float]:
-    """Run YAMNet and return normalized speech/music/noise scores."""
+def yamnet_score_matrix(session: Any, audio: np.ndarray, sr: int) -> np.ndarray:
+    """Run YAMNet and return per-frame class scores ``(frames, 521)``."""
     audio = resample(audio, sr, 16000)
     if len(audio) < 1600:
         audio = np.pad(audio, (0, 1600 - len(audio)))
     waveform = audio.astype(np.float32)
-
     inp_name = session.get_inputs()[0].name
     outputs = run_session(session, {inp_name: waveform})
     scores = np.asarray(outputs[0], dtype=np.float32)
     if scores.ndim == 1:
         scores = scores.reshape(1, -1)
-    per_frame = [ _bucket_scores(scores[i]) for i in range(scores.shape[0]) ]
+    return scores
+
+
+def yamnet_class_means(session: Any, audio: np.ndarray, sr: int) -> np.ndarray:
+    """Mean YAMNet class scores across frames."""
+    return yamnet_score_matrix(session, audio, sr).mean(axis=0)
+
+
+def classify_yamnet(session: Any, audio: np.ndarray, sr: int) -> dict[str, float]:
+    """Run YAMNet and return normalized speech/music/noise scores."""
+    scores = yamnet_score_matrix(session, audio, sr)
+    per_frame = [_bucket_scores(scores[i]) for i in range(scores.shape[0])]
     if not per_frame:
         return {"speech": 0.0, "music": 0.0, "noise": 1.0}
     out = {

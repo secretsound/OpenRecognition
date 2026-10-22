@@ -15,9 +15,4 @@ export function roleFromScopes(scopes: string[] | null | undefined): Role {
   return "viewer";
 }
 
-export function roleLabel(role: string | null | undefined): string {
-  if (role === "admin") return "Admin";
-  if (role === "operator") return "Operator";
-  if (role === "viewer") return "Viewer";
-  return "Signed in";
-}
+export { roleLabel } from "@/i18n";

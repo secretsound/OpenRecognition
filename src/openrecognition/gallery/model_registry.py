@@ -31,6 +31,18 @@ from openrecognition.models_download import (
 )
 
 _SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def _phrase_list(value) -> list[str]:
+    """Turn a sentence that was stored one letter at a time back into one line."""
+    if isinstance(value, str):
+        return [value] if value else []
+    items = [str(item) for item in value]
+    if len(items) > 1 and all(len(item) <= 1 for item in items):
+        return ["".join(items)]
+    return items
+
+
 _IDENTITY = {
     "voice_match": ("audio", None),
     "match_face": ("image", ("person",)),
@@ -151,7 +163,7 @@ def _row_to_record(row, overrides: dict) -> ModelRecord:
         hardware_note=row["hardware_note"],
         tier=row["tier"],
         depends_on=list(_loads(row["depends_on_json"], [])),
-        enables=list(_loads(row["enables_json"], [])),
+        enables=_phrase_list(_loads(row["enables_json"], [])),
         contract=dict(_loads(row["contract_json"], {})),
         defaults=dict(_loads(row["defaults_json"], {})),
         overrides=dict(overrides),

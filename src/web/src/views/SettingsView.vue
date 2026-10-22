@@ -1,24 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
-  NSelect,
-  NSwitch,
-  NButton,
-  NSpace,
-  NDescriptions,
-  NDescriptionsItem,
-  NInputNumber,
-  NSlider,
   NAlert,
-  NTag,
-  NPopconfirm,
+  NButton,
   NIcon,
+  NInput,
+  NInputNumber,
+  NPopconfirm,
+  NSelect,
+  NSlider,
+  NSpace,
+  NSwitch,
   useMessage,
 } from "naive-ui";
 import type { SelectOption } from "naive-ui";
-import { PowerOutline, CopyOutline } from "@vicons/ionicons5";
-import { api, loadFailureMessage } from "@/api/client";
+import { CopyOutline, PowerOutline } from "@vicons/ionicons5";
+import { api, ApiError, loadFailureMessage } from "@/api/client";
 import type { AppSettingsOut, ServiceRestartOut } from "@/types/api";
 import PageHeader from "@/components/kit/PageHeader.vue";
 import SegmentedControl from "@/components/kit/SegmentedControl.vue";
@@ -27,24 +25,53 @@ import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import SettingsSection from "@/components/settings/SettingsSection.vue";
 import SettingRow from "@/components/settings/SettingRow.vue";
-import { ApiError } from "@/api/client";
+import NetworkSettings from "@/components/settings/NetworkSettings.vue";
+import StorageSettings from "@/components/settings/StorageSettings.vue";
+import BackupSettings from "@/components/settings/BackupSettings.vue";
+import LogsSettings from "@/components/settings/LogsSettings.vue";
+import SsoSettings from "@/components/settings/SsoSettings.vue";
+import {
+  draftDirty,
+  draftError,
+  draftFrom,
+  draftPatch,
+  type SettingsDraft,
+} from "@/components/settings/settingsDraft";
 import { featureFlagEntries } from "@/utils/featureFlags";
 import { useTheme } from "@/composables/useTheme";
 import { useUnsavedGuard } from "@/composables/useUnsaved";
 import { webUiVersion, buildRuntime } from "@/buildInfo";
 import { ensureSystemInfo, lanApiUrls as buildLanUrls } from "@/utils/settingsSystem";
+import { setLocale, t } from "@/i18n";
+import { setDisplayTimeZone } from "@/utils/time";
 
 const message = useMessage();
 const router = useRouter();
 const { mode, setTheme, accentId, setAccent, accentOptions, themeModeOptions } = useTheme();
 
-type SettingsTab = "appearance" | "recognition" | "security" | "system" | "advanced";
-const settingsTabs: { value: SettingsTab; label: string }[] = [
-  { value: "appearance", label: "Appearance" },
-  { value: "recognition", label: "Recognition" },
-  { value: "security", label: "Security" },
-  { value: "system", label: "System" },
-  { value: "advanced", label: "Advanced" },
+type Section =
+  | "general"
+  | "network"
+  | "storage"
+  | "backup"
+  | "logs"
+  | "security"
+  | "sso"
+  | "recognition"
+  | "advanced"
+  | "system";
+
+const sections: { id: Section; key: string }[] = [
+  { id: "general", key: "settings.section.general" },
+  { id: "network", key: "settings.section.network" },
+  { id: "storage", key: "settings.section.storage" },
+  { id: "backup", key: "settings.section.backup" },
+  { id: "logs", key: "settings.section.logs" },
+  { id: "security", key: "settings.section.security" },
+  { id: "sso", key: "sso.title" },
+  { id: "recognition", key: "settings.section.recognition" },
+  { id: "advanced", key: "settings.section.advanced" },
+  { id: "system", key: "settings.section.system" },
 ];
 
 const loading = ref(true);
@@ -52,50 +79,73 @@ const loadError = ref<string | null>(null);
 const saving = ref(false);
 const restarting = ref(false);
 const settings = ref<AppSettingsOut | null>(null);
-const activeTab = ref<SettingsTab>("appearance");
+const section = ref<Section>("general");
+const draft = ref<SettingsDraft | null>(null);
 
-const draft = ref({
-  maintenance_mode: false,
-  enrollment_media_retention: "embeddings_only" as string,
-  feature_flags: {} as Record<string, boolean>,
-  default_min_confidence: 0.75,
-  default_return_unknown: true,
-  default_include_sound_events: false,
-  recognition_log_retention_days: 0,
-  session_ttl_minutes: 60,
-  model_idle_unload_minutes: 0,
-});
-
-const retentionOptions: SelectOption[] = [
-  { label: "Embeddings only (recommended)", value: "embeddings_only" },
-  { label: "Keep original media files", value: "keep" },
+const languages = [
+  { value: "en", label: "English" },
+  { value: "es", label: "Español" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
+  { value: "pt", label: "Português" },
+  { value: "zh", label: "中文" },
 ];
 
-const logRetentionOptions: SelectOption[] = [
-  { label: "Keep forever", value: 0 },
-  { label: "7 days", value: 7 },
-  { label: "30 days", value: 30 },
-  { label: "90 days", value: 90 },
-  { label: "365 days", value: 365 },
-];
-
-const flagRows = computed(() => featureFlagEntries(draft.value.feature_flags));
-
-const system = computed(() => settings.value?.system ?? null);
-
-const browserOrigin = computed(() =>
-  typeof window !== "undefined" ? window.location.origin : "",
+const themeOptions = computed(() =>
+  themeModeOptions.map((opt) => ({ ...opt, label: t(`theme.${opt.value}`) })),
 );
 
-const lanUrls = computed(() => (settings.value ? buildLanUrls(settings.value) : []));
+const retentionOptions = computed<SelectOption[]>(() => [
+  { label: t("recognition.keepEmbeddings"), value: "embeddings_only" },
+  { label: t("recognition.keepFiles"), value: "keep" },
+]);
 
+const logRetentionOptions = computed<SelectOption[]>(() => [
+  { label: t("recognition.forever"), value: 0 },
+  { label: t("recognition.days", { n: 7 }), value: 7 },
+  { label: t("recognition.days", { n: 30 }), value: 30 },
+  { label: t("recognition.days", { n: 90 }), value: 90 },
+  { label: t("recognition.days", { n: 365 }), value: 365 },
+]);
+
+const flagCopy: Record<string, { label: string; description: string }> = {
+  "biometrics.face_enabled": { label: "flag.face", description: "flag.faceDesc" },
+  "biometrics.speaker_enabled": { label: "flag.speaker", description: "flag.speakerDesc" },
+  "biometrics.pet_enabled": { label: "flag.pet", description: "flag.petDesc" },
+  "recognition.sound_events_enabled": { label: "flag.sounds", description: "flag.soundsDesc" },
+};
+
+const flagRows = computed(() =>
+  featureFlagEntries(draft.value?.feature_flags ?? {}).map((row) => ({
+    ...row,
+    label: flagCopy[row.key] ? t(flagCopy[row.key].label) : row.label,
+    description: flagCopy[row.key] ? t(flagCopy[row.key].description) : row.description,
+  })),
+);
+
+const system = computed(() => settings.value?.system ?? null);
+const browserOrigin = computed(() => (typeof window !== "undefined" ? window.location.origin : ""));
+const lanUrls = computed(() => (settings.value ? buildLanUrls(settings.value) : []));
+const showAllLan = ref(false);
+const visibleLan = computed(() => (showAllLan.value ? lanUrls.value : lanUrls.value.slice(0, 2)));
+const hiddenLan = computed(() => Math.max(0, lanUrls.value.length - 2));
 const systemStale = computed(() => system.value?.python_version === "—");
 
+const osSummary = computed(() => {
+  const raw = system.value?.platform ?? "";
+  if (!raw || raw === "—") return { name: "—", detail: "" };
+  const [os, kernel = ""] = raw.split("-");
+  const name =
+    os === "Darwin" ? "macOS" : os === "Linux" ? "Linux" : os.startsWith("Windows") ? "Windows" : os;
+  const arch = raw.match(/\b(x86_64|aarch64|arm64|amd64|i386|armv7l)\b/)?.[1] ?? "";
+  return { name, detail: [arch, kernel].filter(Boolean).join(" · ") };
+});
+
 const inferenceBackendLabel = computed(() => {
-  const b = settings.value?.inference_backend ?? "auto";
-  if (b === "auto") return "Auto (ONNX when available)";
-  if (b === "onnx") return "ONNX";
-  return "Heuristic";
+  const backend = settings.value?.inference_backend ?? "auto";
+  if (backend === "auto") return t("recognition.auto");
+  if (backend === "onnx") return t("recognition.onnx");
+  return t("recognition.heuristic");
 });
 
 const loadedModelCount = computed(() => {
@@ -104,48 +154,72 @@ const loadedModelCount = computed(() => {
 });
 
 const confidencePercent = computed({
-  get: () => Math.round(draft.value.default_min_confidence * 100),
-  set: (v: number) => {
-    draft.value.default_min_confidence = v / 100;
+  get: () => Math.round((draft.value?.default_min_confidence ?? 0.75) * 100),
+  set: (value: number) => {
+    if (draft.value) draft.value.default_min_confidence = value / 100;
   },
 });
 
-function numField<K extends keyof typeof draft.value>(key: K, server: AppSettingsOut): boolean {
-  return (draft.value[key] as number) !== (server[key] as number);
-}
+const dirty = computed(() =>
+  settings.value && draft.value ? draftDirty(draft.value, settings.value) : false,
+);
 
-const dirty = computed(() => {
-  if (!settings.value) return false;
-  const s = settings.value;
-  if (draft.value.maintenance_mode !== s.maintenance_mode) return true;
-  if (draft.value.enrollment_media_retention !== s.enrollment_media_retention) return true;
-  if (draft.value.default_min_confidence !== s.default_min_confidence) return true;
-  if (draft.value.default_return_unknown !== s.default_return_unknown) return true;
-  if (draft.value.default_include_sound_events !== s.default_include_sound_events) return true;
-  if (draft.value.recognition_log_retention_days !== s.recognition_log_retention_days) return true;
-  if (draft.value.session_ttl_minutes !== s.session_ttl_minutes) return true;
-  if (numField("model_idle_unload_minutes", s)) return true;
-  for (const row of flagRows.value) {
-    if ((s.feature_flags[row.key] ?? false) !== (draft.value.feature_flags[row.key] ?? false)) {
-      return true;
-    }
-  }
-  return false;
+const errorKey = computed(() =>
+  draft.value ? draftError(draft.value, Boolean(settings.value?.oidc_client_secret_set)) : null,
+);
+
+const restartPending = computed(() => settings.value?.restart_pending ?? []);
+
+const timeZones = computed(() => {
+  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+  const zones = intl.supportedValuesOf?.("timeZone") ?? [];
+  return ["UTC", ...zones.filter((zone) => zone !== "UTC")].map((value) => ({ label: value, value }));
 });
 
-function applyFromServer(s: AppSettingsOut) {
-  settings.value = s;
-  draft.value = {
-    maintenance_mode: s.maintenance_mode,
-    enrollment_media_retention: s.enrollment_media_retention,
-    feature_flags: { ...s.feature_flags },
-    default_min_confidence: s.default_min_confidence,
-    default_return_unknown: s.default_return_unknown,
-    default_include_sound_events: s.default_include_sound_events,
-    recognition_log_retention_days: s.recognition_log_retention_days,
-    session_ttl_minutes: s.session_ttl_minutes,
-    model_idle_unload_minutes: s.model_idle_unload_minutes,
-  };
+const monitorBase = computed(() => {
+  const pub = (draft.value?.public_url || settings.value?.public_url || "").trim().replace(/\/$/, "");
+  if (pub) return pub;
+  const local = system.value?.api_local_url || "";
+  try {
+    return new URL(local).origin;
+  } catch {
+    return local.replace(/\/$/, "");
+  }
+});
+
+watch(
+  () => draft.value?.display_language,
+  (code) => {
+    if (code) setLocale(code);
+  },
+);
+
+watch(
+  () => draft.value?.display_timezone,
+  (zone) => {
+    if (zone) setDisplayTimeZone(zone);
+  },
+);
+
+function applyFromServer(value: AppSettingsOut) {
+  settings.value = value;
+  draft.value = draftFrom(value);
+  setLocale(value.display_language ?? "en");
+  setDisplayTimeZone(value.display_timezone || "UTC");
+}
+
+function generateMetricsToken() {
+  if (!draft.value) return;
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  draft.value.metrics_token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  draft.value.clear_metrics_token = false;
+}
+
+function clearMetricsToken() {
+  if (!draft.value) return;
+  draft.value.metrics_token = "";
+  draft.value.clear_metrics_token = true;
 }
 
 async function fetchHealth(): Promise<{ version?: string } | null> {
@@ -168,7 +242,7 @@ async function load() {
     ]);
     applyFromServer(ensureSystemInfo(raw, health));
   } catch (e) {
-    loadError.value = loadFailureMessage(e, "Failed to load settings");
+    loadError.value = loadFailureMessage(e, t("settings.loadFailed"));
     message.error(loadError.value);
   } finally {
     loading.value = false;
@@ -176,27 +250,25 @@ async function load() {
 }
 
 async function save() {
+  if (!draft.value) return;
+  if (errorKey.value) {
+    message.error(t(errorKey.value));
+    return;
+  }
+  if (draft.value.port == null || draft.value.https_port == null || draft.value.session_ttl_minutes == null) {
+    return;
+  }
   saving.value = true;
   try {
     const raw = await api<AppSettingsOut>("/v1/admin/settings", {
       method: "PATCH",
-      json: {
-        maintenance_mode: draft.value.maintenance_mode,
-        enrollment_media_retention: draft.value.enrollment_media_retention,
-        feature_flags: { ...draft.value.feature_flags },
-        default_min_confidence: draft.value.default_min_confidence,
-        default_return_unknown: draft.value.default_return_unknown,
-        default_include_sound_events: draft.value.default_include_sound_events,
-        recognition_log_retention_days: draft.value.recognition_log_retention_days,
-        session_ttl_minutes: draft.value.session_ttl_minutes,
-        model_idle_unload_minutes: draft.value.model_idle_unload_minutes,
-      },
+      json: draftPatch(draft.value),
     });
     const health = await fetchHealth();
     applyFromServer(ensureSystemInfo(raw, health));
-    message.success("Settings saved");
+    message.success(t("settings.saved"));
   } catch (e) {
-    message.error(e instanceof ApiError ? e.message : "Failed to save settings");
+    message.error(e instanceof ApiError ? e.message : t("settings.saveFailed"));
   } finally {
     saving.value = false;
   }
@@ -205,9 +277,9 @@ async function save() {
 async function copyText(text: string, label: string) {
   try {
     await navigator.clipboard.writeText(text);
-    message.success(`Copied ${label}`);
+    message.success(t("settings.copied", { label }));
   } catch {
-    message.error("Could not copy");
+    message.error(t("settings.copyFailed"));
   }
 }
 
@@ -227,7 +299,7 @@ async function waitForServiceBack(timeoutMs = 90_000) {
     }
     await sleep(1500);
   }
-  throw new Error("Timed out waiting for the service to come back");
+  throw new Error(t("settings.restartWait"));
 }
 
 async function restartService() {
@@ -237,16 +309,17 @@ async function restartService() {
     const res = await api<ServiceRestartOut>("/v1/admin/restart", { method: "POST" });
     message.info(res.message);
     await waitForServiceBack();
-    message.success("Service restarted");
+    message.success(t("settings.restarted"));
     await load();
   } catch (e) {
-    message.error(e instanceof Error ? e.message : "Restart failed");
+    message.error(e instanceof Error ? e.message : t("settings.restartFailed"));
   } finally {
     restarting.value = false;
   }
 }
 
 function setFlag(key: string, value: boolean) {
+  if (!draft.value) return;
   draft.value.feature_flags = { ...draft.value.feature_flags, [key]: value };
 }
 
@@ -257,397 +330,657 @@ function resetDraft() {
 useUnsavedGuard(dirty);
 
 onMounted(load);
+onUnmounted(() => {
+  const saved = settings.value?.display_language;
+  if (saved && draft.value && draft.value.display_language !== saved) setLocale(saved);
+  if (settings.value) setDisplayTimeZone(settings.value.display_timezone || "UTC");
+});
 </script>
 
 <template>
-  <div class="or-page or-page--prose">
-    <PageHeader
-      title="Settings"
-      description="Appearance, recognition defaults, who can sign in, and how this server is running."
-    >
-      <template #tabs>
-        <SegmentedControl
-          v-model="activeTab"
-          aria-label="Settings sections"
-          :options="settingsTabs"
-        />
-      </template>
-    </PageHeader>
+  <div class="or-page settings-page">
+    <PageHeader :title="t('settings.title')" :description="t('settings.lead')" />
 
     <ContentSkeleton v-if="loading && !settings" variant="detail" />
     <EmptyState
       v-else-if="loadError && !settings"
-      title="Couldn't load settings"
+      :title="t('settings.loadTitle')"
       :description="loadError"
-      action-label="Retry"
+      :action-label="t('settings.retry')"
       @action="load"
     />
 
-    <template v-else-if="settings && system">
-      <section v-if="activeTab === 'appearance'" class="tab-panel">
-              <SettingsSection title="Theme">
-                <SettingRow label="Color mode">
-                  <SegmentedControl
-                    :model-value="mode"
-                    :options="themeModeOptions"
-                    aria-label="Color mode"
-                    @update:model-value="setTheme"
+    <template v-else-if="settings && system && draft">
+      <NAlert v-if="restartPending.length" type="warning" :bordered="false">
+        {{ t("settings.restartBanner", { keys: restartPending.join(", ") }) }}
+      </NAlert>
+      <NAlert v-if="errorKey" type="error" :bordered="false">{{ t(errorKey) }}</NAlert>
+
+      <div class="settings-shell">
+        <nav class="settings-nav" :aria-label="t('settings.title')">
+          <button
+            v-for="item in sections"
+            :key="item.id"
+            type="button"
+            class="settings-nav__item"
+            :class="{ 'is-active': section === item.id }"
+            :aria-current="section === item.id ? 'page' : undefined"
+            @click="section = item.id"
+          >
+            {{ t(item.key) }}
+          </button>
+        </nav>
+
+        <div class="settings-main">
+          <section v-if="section === 'general'">
+            <SettingsSection :title="t('general.theme')">
+              <SettingRow :label="t('general.language')">
+                <NSelect v-model:value="draft.display_language" :options="languages" style="width: 200px" />
+                <template #hint>{{ t("general.languageHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('general.timezone')">
+                <NSelect
+                  v-model:value="draft.display_timezone"
+                  :options="timeZones"
+                  filterable
+                  style="width: 280px"
+                />
+                <template #hint>{{ t("general.timezoneHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('general.mode')">
+                <SegmentedControl
+                  :model-value="mode"
+                  :options="themeOptions"
+                  :aria-label="t('general.mode')"
+                  @update:model-value="setTheme"
+                />
+                <template #hint>{{ t("general.modeHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('general.accent')">
+                <div class="accent-swatches">
+                  <button
+                    v-for="opt in accentOptions"
+                    :key="opt.value"
+                    type="button"
+                    class="swatch"
+                    :class="{ 'is-active': accentId === opt.value }"
+                    :style="{ background: opt.color }"
+                    :aria-label="opt.label"
+                    :title="opt.label"
+                    @click="setAccent(opt.value)"
                   />
-                  <template #hint>Stored in this browser. System follows the OS.</template>
-                </SettingRow>
-                <SettingRow label="Accent">
-                  <div class="accent-swatches">
-                    <button
-                      v-for="opt in accentOptions"
-                      :key="opt.value"
-                      type="button"
-                      class="swatch"
-                      :class="{ 'is-active': accentId === opt.value }"
-                      :style="{ background: opt.color }"
-                      :aria-label="opt.label"
-                      :title="opt.label"
-                      @click="setAccent(opt.value)"
-                    />
-                  </div>
-                  <template #hint>
-                    Buttons, links, navigation, and the sidebar logo.
-                  </template>
-                </SettingRow>
-              </SettingsSection>
-      </section>
+                </div>
+                <template #hint>{{ t("general.accentHint") }}</template>
+              </SettingRow>
+            </SettingsSection>
+          </section>
 
-      <section v-if="activeTab === 'recognition'" class="tab-panel">
-              <SettingsSection
-                title="Defaults"
-                description="Used when a request does not set its own options."
-              >
-                <SettingRow :label="`Match threshold (${confidencePercent}%)`">
-                  <div class="slider-wrap">
-                    <NSlider
-                      v-model:value="confidencePercent"
-                      :min="50"
-                      :max="95"
-                      :step="1"
-                    />
-                  </div>
-                </SettingRow>
-                <SettingRow label="Return unknown identities">
-                  <NSwitch v-model:value="draft.default_return_unknown" />
-                  <template #hint>
-                    Report low-confidence matches as <code>unknown</code> instead of omitting them.
-                  </template>
-                </SettingRow>
-                <SettingRow label="Sound events by default">
-                  <NSwitch v-model:value="draft.default_include_sound_events" />
-                  <template #hint>
-                    Heuristic labels on audio requests (glass break, bark, etc.).
-                  </template>
-                </SettingRow>
-              </SettingsSection>
+          <NetworkSettings v-else-if="section === 'network'" :draft="draft" :settings="settings" />
+          <StorageSettings v-else-if="section === 'storage'" :draft="draft" :settings="settings" />
+          <BackupSettings v-else-if="section === 'backup'" />
+          <LogsSettings
+            v-else-if="section === 'logs'"
+            :draft="draft"
+            :log-file="settings.log_file ?? ''"
+          />
 
-              <SettingsSection title="Models">
-                <SettingRow label="Inference">
-                  <NButton @click="router.push('/models')">Open Models</NButton>
-                  <template #hint>
-                    Currently {{ inferenceBackendLabel }}. Download or reload weights on the Models page.
-                  </template>
-                </SettingRow>
-              </SettingsSection>
-
-              <SettingsSection title="Samples">
-                <SettingRow label="Keep original files">
-                  <NSelect
-                    v-model:value="draft.enrollment_media_retention"
-                    :options="retentionOptions"
-                    style="width: 280px"
+          <section v-else-if="section === 'security'">
+            <SettingsSection :title="t('security.sessions')">
+              <SettingRow :label="t('security.session')">
+                <NSpace align="center" :size="8">
+                  <NInputNumber
+                    v-model:value="draft.session_ttl_minutes"
+                    :min="5"
+                    :max="10080"
+                    style="width: 120px"
                   />
-                  <template #hint>
-                    Embeddings are the compact fingerprints used for matching. You can keep the original files or only those fingerprints.
-                  </template>
-                </SettingRow>
-                <SettingRow label="Activity retention">
-                  <NSelect
-                    v-model:value="draft.recognition_log_retention_days"
-                    :options="logRetentionOptions"
-                    style="width: 200px"
+                  <span class="unit">{{ t("security.min") }}</span>
+                </NSpace>
+                <template #hint>{{ t("security.sessionHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('security.maintenance')">
+                <NSwitch v-model:value="draft.maintenance_mode" />
+                <template #hint>{{ t("security.maintenanceHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('security.rate')">
+                <NSpace align="center" :size="8">
+                  <NInputNumber
+                    v-model:value="draft.auth_rate_limit_per_minute"
+                    :min="1"
+                    :max="10000"
+                    style="width: 120px"
                   />
-                  <template #hint>How long Activity keeps events. View them on the Activity page.</template>
-                </SettingRow>
-              </SettingsSection>
-      </section>
+                  <span class="unit">/ {{ t("security.min") }}</span>
+                </NSpace>
+                <template #hint>{{ t("security.rateHint") }}</template>
+              </SettingRow>
+            </SettingsSection>
+          </section>
 
-      <section v-if="activeTab === 'security'" class="tab-panel">
-              <SettingsSection title="Sessions & limits">
-                <SettingRow label="Web session lifetime">
-                  <NSpace align="center" :size="8">
-                    <NInputNumber
-                      v-model:value="draft.session_ttl_minutes"
-                      :min="5"
-                      :max="10080"
-                      style="width: 120px"
-                    />
-                    <span class="unit">min</span>
-                  </NSpace>
-                  <template #hint>
-                    Browser login duration. Active sessions keep their original expiry.
-                  </template>
-                </SettingRow>
-                <SettingRow label="Maintenance mode">
-                  <NSwitch v-model:value="draft.maintenance_mode" />
-                  <template #hint>
-                    Pauses recognition and new samples. You can still use this console.
-                  </template>
-                </SettingRow>
-                <SettingRow label="API rate limit">
-                  <NTag size="small" round :bordered="false">
-                    {{ settings.auth_rate_limit_per_minute }} / min
-                  </NTag>
-                  <template #hint>
-                    Set via <code>OPENRECOGNITION_AUTH_RATE_LIMIT_PER_MINUTE</code> (enforcement pending).
-                  </template>
-                </SettingRow>
-              </SettingsSection>
-      </section>
+          <SsoSettings v-else-if="section === 'sso'" :draft="draft" :settings="settings" />
 
-      <section v-if="activeTab === 'system'" class="tab-panel">
-              <NAlert type="info" :bordered="false" class="system-warn">
-                Saved changes are stored in
-                <code>{{ settings.runtime_settings_path || "data/runtime_settings.json" }}</code>.
-                Pack, bind address, and auth come from environment variables.
-              </NAlert>
-              <SettingsSection title="Process">
-                <SettingRow label="Unload idle models">
-                  <NSpace align="center" :size="8">
-                    <NInputNumber
-                      v-model:value="draft.model_idle_unload_minutes"
-                      :min="0"
-                      :max="1440"
-                      style="width: 120px"
-                    />
-                    <span class="unit">min (0 = never)</span>
-                  </NSpace>
-                  <template #hint>
-                    Free memory by unloading models that have not been used. ONNX is the optional faster engine.
-                  </template>
-                </SettingRow>
-                <SettingRow label="Restart service">
-                  <NPopconfirm
-                    positive-text="Restart"
-                    negative-text="Cancel"
-                    @positive-click="restartService"
-                  >
-                    <template #trigger>
-                      <NButton secondary :loading="restarting">
-                        <template #icon>
-                          <NIcon><PowerOutline /></NIcon>
-                        </template>
-                        Restart now
-                      </NButton>
-                    </template>
-                    Restart the API? Unsaved changes are saved first.
-                  </NPopconfirm>
-                  <template #hint>
-                    The server pauses briefly. Docker or systemd environment changes need a container recreate.
-                  </template>
-                </SettingRow>
-              </SettingsSection>
-              <NAlert
-                v-if="systemStale"
-                type="warning"
-                :bordered="false"
-                class="system-warn"
-                title="Limited system info"
-              >
-                Restart the OpenRecognition API to load full host and Python details.
-              </NAlert>
+          <section v-else-if="section === 'recognition'">
+            <SettingsSection :title="t('recognition.defaults')" :description="t('recognition.defaultsHint')">
+              <SettingRow :label="t('recognition.threshold', { n: confidencePercent })">
+                <div class="slider-wrap">
+                  <NSlider v-model:value="confidencePercent" :min="50" :max="95" :step="1" />
+                </div>
+              </SettingRow>
+              <SettingRow :label="t('recognition.unknown')">
+                <NSwitch v-model:value="draft.default_return_unknown" />
+                <template #hint>{{ t("recognition.unknownHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('recognition.sounds')">
+                <NSwitch v-model:value="draft.default_include_sound_events" />
+                <template #hint>{{ t("recognition.soundsHint") }}</template>
+              </SettingRow>
+            </SettingsSection>
+            <SettingsSection :title="t('recognition.models')">
+              <SettingRow :label="t('recognition.models')">
+                <NButton @click="router.push('/models')">{{ t("recognition.openModels") }}</NButton>
+                <template #hint>
+                  {{ t("recognition.inference", { backend: inferenceBackendLabel }) }}
+                </template>
+              </SettingRow>
+            </SettingsSection>
+            <SettingsSection :title="t('recognition.samples')">
+              <SettingRow :label="t('recognition.keep')">
+                <NSelect
+                  v-model:value="draft.enrollment_media_retention"
+                  :options="retentionOptions"
+                  style="width: 280px"
+                />
+                <template #hint>{{ t("recognition.keepHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('recognition.activity')">
+                <NSelect
+                  v-model:value="draft.recognition_log_retention_days"
+                  :options="logRetentionOptions"
+                  style="width: 200px"
+                />
+                <template #hint>{{ t("recognition.activityHint") }}</template>
+              </SettingRow>
+            </SettingsSection>
+          </section>
 
-              <div class="system-grid">
-                <SettingsSection title="Versions">
-                  <NDescriptions :column="1" label-placement="left" size="small">
-                    <NDescriptionsItem label="OpenRecognition">
-                      <NTag size="small" round :bordered="false">{{ system.server_version }}</NTag>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Python">
-                      {{ system.python_version }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Web UI">
-                      {{ webUiVersion }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Built with">
-                      {{ buildRuntime }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Platform">
-                      <span class="mono">{{ system.platform }}</span>
-                    </NDescriptionsItem>
-                  </NDescriptions>
-                </SettingsSection>
+          <section v-else-if="section === 'advanced'">
+            <SettingsSection :title="t('settings.section.advanced')" :description="t('advanced.lead')">
+              <SettingRow v-for="row in flagRows" :key="row.key" :label="row.label">
+                <NSwitch
+                  :value="draft.feature_flags[row.key] ?? false"
+                  @update:value="(v: boolean) => setFlag(row.key, v)"
+                />
+                <template v-if="row.description" #hint>{{ row.description }}</template>
+              </SettingRow>
+            </SettingsSection>
+          </section>
 
-                <SettingsSection title="Network">
-                  <NDescriptions :column="1" label-placement="left" size="small">
-                    <NDescriptionsItem label="Hostname">
-                      {{ system.hostname }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="API bind">
-                      {{ system.api_bind }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Local API">
-                      <span class="copy-line">
-                        <code class="mono">{{ system.api_local_url }}</code>
-                        <NButton
-                          quaternary
-                          size="tiny"
-                          aria-label="Copy local API URL"
-                          @click="copyText(system.api_local_url, 'URL')"
-                        >
-                          <template #icon>
-                            <NIcon :component="CopyOutline" />
-                          </template>
-                        </NButton>
-                      </span>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="LAN">
-                      <template v-if="lanUrls.length">
-                        <div class="url-list">
-                          <span
-                            v-for="url in lanUrls"
-                            :key="url"
-                            class="copy-line"
-                          >
-                            <code class="mono">{{ url }}</code>
-                            <NButton
-                              quaternary
-                              size="tiny"
-                              :aria-label="`Copy ${url}`"
-                              @click="copyText(url, 'URL')"
-                            >
-                              <template #icon>
-                                <NIcon :component="CopyOutline" />
-                              </template>
-                            </NButton>
-                          </span>
-                        </div>
-                      </template>
-                      <span v-else class="muted">None detected</span>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="This browser">
-                      <code class="mono">{{ browserOrigin || "—" }}</code>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem v-if="system.web_origin" label="CORS origin">
-                      <code class="mono">{{ system.web_origin }}</code>
-                    </NDescriptionsItem>
-                  </NDescriptions>
-                </SettingsSection>
-
-                <SettingsSection title="Deployment">
-                  <NDescriptions :column="1" label-placement="left" size="small">
-                    <NDescriptionsItem label="Hardware">
-                      <NTag size="small" round :bordered="false" type="info">{{ settings.hardware.label }}</NTag>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Auth">
-                      {{ settings.auth_required ? "Required" : "Off" }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Data">
-                      <span class="mono">{{ settings.data_dir }}</span>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Models">
-                      <span class="mono">{{ settings.models_dir }}</span>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Web UI">
-                      {{ settings.web_enabled ? "Enabled" : "Disabled" }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="API docs">
-                      {{ settings.docs_enabled ? "Enabled" : "Disabled" }}
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Inference">
-                      {{ inferenceBackendLabel }}
-                      <NButton
-                        text
-                        type="primary"
-                        size="tiny"
-                        class="inline-link"
-                        @click="router.push('/models')"
-                      >
-                        Models →
-                      </NButton>
-                    </NDescriptionsItem>
-                    <NDescriptionsItem label="Loaded models">
-                      {{ loadedModelCount ?? "—" }}
-                    </NDescriptionsItem>
-                  </NDescriptions>
-                </SettingsSection>
-
-                <SettingsSection
-                  title="Environment"
-                  description="Requires service restart (Docker, systemd, or manual)."
-                >
-                  <NSpace size="small">
-                    <NTag
-                      v-for="key in settings.restart_required_for"
-                      :key="key"
-                      size="small"
-                      round
-                      :bordered="false"
-                    >
-                      OPENRECOGNITION_{{ key.toUpperCase() }}
-                    </NTag>
-                  </NSpace>
-                  <p class="env-examples">
-                    <code>OPENRECOGNITION_MODELS_DIR=./models</code>
-                    <code>OPENRECOGNITION_HOST=0.0.0.0</code>
-                    <code>OPENRECOGNITION_PORT=8080</code>
-                  </p>
-                </SettingsSection>
+          <section v-else class="system-panel">
+            <div class="glance">
+              <div class="glance__item">
+                <span class="or-caps">{{ t("system.product") }}</span>
+                <strong>{{ system.server_version }}</strong>
               </div>
-      </section>
+              <div class="glance__item">
+                <span class="or-caps">{{ t("system.hardware") }}</span>
+                <strong>{{ settings.hardware.label }}</strong>
+              </div>
+              <div class="glance__item">
+                <span class="or-caps">{{ t("system.hostname") }}</span>
+                <strong>{{ system.hostname }}</strong>
+              </div>
+              <div class="glance__item">
+                <span class="or-caps">{{ t("system.loaded") }}</span>
+                <strong>{{ loadedModelCount ?? "—" }}</strong>
+              </div>
+            </div>
 
-      <section v-if="activeTab === 'advanced'" class="tab-panel">
-              <SettingsSection
-                title="Recognition paths"
-                description="Turn individual ways of recognizing on or off."
-              >
-                <SettingRow
-                  v-for="row in flagRows"
-                  :key="row.key"
-                  :label="row.label"
-                >
-                  <NSwitch
-                    :value="draft.feature_flags[row.key] ?? false"
-                    @update:value="(v: boolean) => setFlag(row.key, v)"
+            <SettingsSection :title="t('system.process')">
+              <SettingRow :label="t('system.unload')">
+                <NSpace align="center" :size="8">
+                  <NInputNumber
+                    v-model:value="draft.model_idle_unload_minutes"
+                    :min="0"
+                    :max="1440"
+                    style="width: 120px"
                   />
-                  <template v-if="row.description" #hint>{{ row.description }}</template>
-                </SettingRow>
-              </SettingsSection>
-      </section>
-      <StickySaveBar :dirty="dirty" :saving="saving" @save="save" @discard="resetDraft" />
+                  <span class="unit">{{ t("system.never") }}</span>
+                </NSpace>
+                <template #hint>{{ t("system.unloadHint") }}</template>
+              </SettingRow>
+              <SettingRow :label="t('settings.restartNow')">
+                <NPopconfirm
+                  :positive-text="t('settings.restart')"
+                  :negative-text="t('settings.cancel')"
+                  @positive-click="restartService"
+                >
+                  <template #trigger>
+                    <NButton secondary :loading="restarting">
+                      <template #icon>
+                        <NIcon><PowerOutline /></NIcon>
+                      </template>
+                      {{ t("settings.restartNow") }}
+                    </NButton>
+                  </template>
+                  {{ t("settings.restartConfirm") }}
+                </NPopconfirm>
+                <template #hint>{{ t("settings.restartHint") }}</template>
+              </SettingRow>
+            </SettingsSection>
+
+            <NAlert
+              v-if="systemStale"
+              type="warning"
+              :bordered="false"
+              class="system-warn"
+              :title="t('system.limited')"
+            >
+              {{ t("system.limitedBody") }}
+            </NAlert>
+
+            <SettingsSection :title="t('system.reachTitle')" :description="t('system.reachHint')">
+              <ul class="fact-list">
+                <li>
+                  <span class="fact-list__label">{{ t("system.onMachine") }}</span>
+                  <div class="fact-list__main">
+                    <span class="fact-list__value or-mono">{{ system.api_local_url }}</span>
+                    <NButton
+                      quaternary
+                      circle
+                      size="small"
+                      :aria-label="t('system.copy')"
+                      @click="copyText(system.api_local_url, t('system.local'))"
+                    >
+                      <template #icon><NIcon><CopyOutline /></NIcon></template>
+                    </NButton>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.onNetwork") }}</span>
+                  <div class="fact-list__stack">
+                    <div v-for="url in visibleLan" :key="url" class="fact-list__main">
+                      <span class="fact-list__value or-mono">{{ url }}</span>
+                      <NButton
+                        quaternary
+                        circle
+                        size="small"
+                        :aria-label="t('system.copy')"
+                        @click="copyText(url, t('system.lan'))"
+                      >
+                        <template #icon><NIcon><CopyOutline /></NIcon></template>
+                      </NButton>
+                    </div>
+                    <span v-if="!lanUrls.length" class="fact-list__value">{{ t("system.none") }}</span>
+                    <button
+                      v-if="hiddenLan > 0"
+                      type="button"
+                      class="fact-list__more"
+                      @click="showAllLan = !showAllLan"
+                    >
+                      {{ showAllLan ? t("system.showLess") : t("system.showMore", { n: hiddenLan }) }}
+                    </button>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.browser") }}</span>
+                  <span class="fact-list__value or-mono">{{ browserOrigin || "—" }}</span>
+                </li>
+              </ul>
+            </SettingsSection>
+
+            <SettingsSection :title="t('monitor.title')" :description="t('monitor.hint')">
+              <ul class="fact-list">
+                <li>
+                  <span class="fact-list__label">{{ t("monitor.live") }}</span>
+                  <div class="fact-list__main">
+                    <span class="fact-list__value or-mono">{{ monitorBase }}/health/live</span>
+                    <NButton
+                      quaternary
+                      circle
+                      size="small"
+                      :aria-label="t('system.copy')"
+                      @click="copyText(`${monitorBase}/health/live`, t('monitor.live'))"
+                    >
+                      <template #icon><NIcon><CopyOutline /></NIcon></template>
+                    </NButton>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("monitor.ready") }}</span>
+                  <div class="fact-list__main">
+                    <span class="fact-list__value or-mono">{{ monitorBase }}/health/ready</span>
+                    <NButton
+                      quaternary
+                      circle
+                      size="small"
+                      :aria-label="t('system.copy')"
+                      @click="copyText(`${monitorBase}/health/ready`, t('monitor.ready'))"
+                    >
+                      <template #icon><NIcon><CopyOutline /></NIcon></template>
+                    </NButton>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("monitor.metrics") }}</span>
+                  <div class="fact-list__main">
+                    <span class="fact-list__value or-mono">{{ monitorBase }}/metrics</span>
+                    <NButton
+                      quaternary
+                      circle
+                      size="small"
+                      :aria-label="t('system.copy')"
+                      @click="copyText(`${monitorBase}/metrics`, t('monitor.metrics'))"
+                    >
+                      <template #icon><NIcon><CopyOutline /></NIcon></template>
+                    </NButton>
+                  </div>
+                </li>
+              </ul>
+              <SettingRow :label="t('monitor.healthPublic')">
+                <NSwitch v-model:value="draft.health_detail_public" />
+                <template #hint>{{ t("monitor.healthPublicHint") }}</template>
+              </SettingRow>
+              <SettingRow stack :label="t('monitor.token')">
+                <NInput
+                  v-model:value="draft.metrics_token"
+                  type="password"
+                  show-password-on="click"
+                  :placeholder="settings.metrics_token_set ? t('monitor.tokenPlaceholder') : ''"
+                />
+                <template #hint>{{ t("monitor.tokenHint") }}</template>
+              </SettingRow>
+              <NAlert v-if="draft.metrics_token.trim()" type="info" :bordered="false" style="margin-bottom: 12px">
+                {{ t("monitor.tokenOnce") }}
+                <div class="token-once">{{ draft.metrics_token }}</div>
+              </NAlert>
+              <NSpace>
+                <NButton secondary @click="generateMetricsToken">{{ t("monitor.generate") }}</NButton>
+                <NButton
+                  v-if="settings.metrics_token_set || draft.metrics_token"
+                  quaternary
+                  @click="clearMetricsToken"
+                >
+                  {{ t("monitor.clear") }}
+                </NButton>
+              </NSpace>
+            </SettingsSection>
+
+            <SettingsSection :title="t('system.installTitle')" :description="t('system.installHint')">
+              <ul class="fact-list">
+                <li>
+                  <span class="fact-list__label">{{ t("system.ui") }}</span>
+                  <div>
+                    <span class="fact-list__value">{{ webUiVersion }}</span>
+                    <span v-if="buildRuntime && buildRuntime !== '—'" class="fact-list__meta">
+                      {{ t("system.built") }} {{ buildRuntime }}
+                    </span>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.python") }}</span>
+                  <span class="fact-list__value">{{ system.python_version }}</span>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.platform") }}</span>
+                  <div>
+                    <span class="fact-list__value">{{ osSummary.name }}</span>
+                    <span v-if="osSummary.detail" class="fact-list__meta">{{ osSummary.detail }}</span>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.engine") }}</span>
+                  <span class="fact-list__value">{{ inferenceBackendLabel }}</span>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.models") }}</span>
+                  <span class="fact-list__value or-mono">{{ settings.models_dir }}</span>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.settingsFile") }}</span>
+                  <span class="fact-list__value or-mono">{{
+                    settings.runtime_settings_path || "data/runtime_settings.json"
+                  }}</span>
+                </li>
+              </ul>
+            </SettingsSection>
+
+            <SettingsSection :title="t('system.lockedTitle')" :description="t('system.lockedHint')">
+              <ul class="fact-list">
+                <li>
+                  <span class="fact-list__label">{{ t("system.auth") }}</span>
+                  <div>
+                    <span class="fact-list__value">{{
+                      settings.auth_required ? t("system.authOn") : t("system.authOff")
+                    }}</span>
+                    <span class="fact-list__meta">OPENRECOGNITION_AUTH_REQUIRED</span>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.web") }}</span>
+                  <div>
+                    <span class="fact-list__value">{{
+                      settings.web_enabled ? t("system.enabled") : t("system.disabled")
+                    }}</span>
+                    <span class="fact-list__meta">OPENRECOGNITION_WEB_ENABLED</span>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.docs") }}</span>
+                  <div>
+                    <span class="fact-list__value">{{
+                      settings.docs_enabled ? t("system.enabled") : t("system.disabled")
+                    }}</span>
+                    <span class="fact-list__meta">OPENRECOGNITION_DOCS_ENABLED</span>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.cors") }}</span>
+                  <div>
+                    <span class="fact-list__value">{{ system.web_origin || t("system.anyOrigin") }}</span>
+                    <span class="fact-list__meta">OPENRECOGNITION_WEB_ORIGIN</span>
+                  </div>
+                </li>
+                <li>
+                  <span class="fact-list__label">{{ t("system.data") }}</span>
+                  <div>
+                    <span class="fact-list__value or-mono">{{ settings.data_dir }}</span>
+                    <span class="fact-list__meta">OPENRECOGNITION_DATA_DIR</span>
+                  </div>
+                </li>
+              </ul>
+            </SettingsSection>
+          </section>
+        </div>
+      </div>
+      <StickySaveBar
+        :dirty="dirty"
+        :saving="saving"
+        :can-save="!errorKey"
+        @save="save"
+        @discard="resetDraft"
+      />
     </template>
   </div>
 </template>
 
 <style scoped>
-.tab-panel {
-  max-width: 640px;
+.settings-page {
+  max-width: 1040px;
 }
 
-.system-grid {
+.settings-shell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  max-width: 100%;
+  gap: 4px;
+  position: sticky;
+  top: 12px;
 }
 
-.system-grid .settings-section {
-  max-width: 560px;
+.settings-nav__item {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--or-text-2);
+  cursor: pointer;
+}
+
+.settings-nav__item:hover {
+  background: var(--or-accent-tint);
+  color: var(--or-text-1);
+}
+
+.settings-nav__item.is-active,
+.settings-nav__item.is-active:hover {
+  background: var(--or-accent);
+  color: var(--or-on-accent);
+  font-weight: 600;
+}
+
+.system-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.system-panel :deep(.settings-section + .settings-section) {
+  margin-top: 0;
+}
+
+.glance {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.glance__item {
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--or-line);
+  background: var(--or-surface);
+}
+
+.glance__item strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.fact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fact-list li {
+  display: grid;
+  grid-template-columns: 9.5rem minmax(0, 1fr);
+  align-items: start;
+  gap: 6px 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--or-line);
+}
+
+.fact-list li:first-child {
+  padding-top: 0;
+}
+
+.fact-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.fact-list__label {
+  padding-top: 2px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--or-text-2);
+}
+
+.fact-list__main,
+.fact-list__stack {
+  min-width: 0;
+}
+
+.fact-list__main {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fact-list__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.fact-list__value {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--or-text-1);
+  overflow-wrap: anywhere;
+}
+
+.fact-list__more {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--or-accent);
+  cursor: pointer;
+}
+
+.fact-list__meta {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--or-font-mono);
+  font-size: 0.75rem;
+  color: var(--or-text-3);
+  overflow-wrap: anywhere;
 }
 
 .system-warn {
-  margin-bottom: 12px;
-  max-width: 560px;
+  margin: 0;
 }
 
-.models-link {
-  margin: 0 0 12px;
+.token-once {
+  margin-top: 6px;
+  font-family: var(--or-font-mono);
   font-size: 0.8125rem;
-  color: var(--n-text-color-3);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .glance {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fact-list li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .fact-list__label {
+    padding-top: 0;
+  }
 }
 
 .slider-wrap {
@@ -673,83 +1006,25 @@ onMounted(load);
   box-shadow: 0 0 0 2px var(--or-surface), 0 0 0 4px var(--or-accent);
 }
 
-.pipeline-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--n-border-color);
-}
-
-.pipeline-row:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.pipeline-row__label {
-  display: block;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.pipeline-row__desc {
-  display: block;
-  margin-top: 4px;
-  font-size: 0.8rem;
-  color: var(--n-text-color-3);
-  line-height: 1.4;
-}
-
 .unit {
   font-size: 0.8125rem;
   color: var(--n-text-color-3);
 }
 
-.mono {
-  font-size: 0.75rem;
-  word-break: break-all;
-}
+@media (max-width: 800px) {
+  .settings-shell {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
 
-.muted {
-  color: var(--n-text-color-3);
-  font-size: 0.8125rem;
-}
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
 
-.copy-line {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-}
-
-.url-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.env-examples {
-  margin: 12px 0 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.env-examples code {
-  font-size: 0.7rem;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--n-action-color);
-}
-
-.inline-link {
-  margin-left: 6px;
-}
-
-@media (max-width: 768px) {
-  .tab-panel {
-    padding-inline: 0;
+  .settings-nav__item {
+    white-space: nowrap;
   }
 }
 </style>

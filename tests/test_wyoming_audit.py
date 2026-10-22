@@ -168,3 +168,47 @@ def test_log_wyoming_transcript_includes_speaker_attempt(client):
     assert details["speaker_match_attempted"] is True
     assert details["speaker_candidates"] == []
     assert details["comparable_speaker_count"] == 0
+
+
+def test_log_keeps_each_enrollment_bar(client):
+    state = client.app.state.app_state
+    result = UtteranceResult(
+        gate="accept",
+        accepted=False,
+        reason="unknown_or_low_confidence",
+        min_confidence=0.8,
+        default_min_confidence=0.5,
+        speaker_match_attempted=True,
+        candidates=[
+            {
+                "label": "Luke",
+                "entity_id": "luke",
+                "confidence": 0.62,
+                "accepted": False,
+                "threshold_used": 0.8,
+            },
+            {
+                "label": "test",
+                "entity_id": "test",
+                "confidence": 0.46,
+                "accepted": False,
+                "threshold_used": 0.4,
+            },
+        ],
+    )
+    log_wyoming_utterance(
+        state.recognition_logs,
+        event="wyoming.transcript",
+        result=result,
+        text="hello",
+        audio_sec=1.2,
+        identify_ms=90,
+        upstream_ms=200,
+        total_ms=300,
+    )
+    items, _ = state.recognition_logs.list_logs(event="wyoming.transcript", limit=1)
+    details = items[0]["details"]
+    assert details["default_min_confidence"] == 0.5
+    assert details["min_confidence"] == 0.8
+    assert details["speaker_candidates"][0]["threshold_used"] == 0.8
+    assert details["speaker_candidates"][1]["threshold_used"] == 0.4

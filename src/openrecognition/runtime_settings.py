@@ -1,6 +1,7 @@
 """Persisted runtime overrides (survive process restart)."""
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,4 +21,8 @@ class RuntimeSettingsStore:
 
     def save(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+        temporary = self.path.with_suffix(".json.tmp")
+        temporary.write_text(payload)
+        os.chmod(temporary, 0o600)
+        temporary.replace(self.path)

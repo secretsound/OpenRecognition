@@ -16,12 +16,14 @@ from openrecognition.api.errors import (
     http_exception_handler,
 )
 from openrecognition.api.request_logging import RequestLoggingMiddleware
+from openrecognition.proxy_headers import ForwardedProxyMiddleware
 from openrecognition.inference.audio_gate import AudioDecodeError
 from openrecognition.api.routes import (
     admin,
     models_admin,
     auth_routes,
     capabilities,
+    groups,
     console,
     enrollments,
     events,
@@ -92,6 +94,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth_routes.router)
+    app.include_router(groups.router)
     app.include_router(capabilities.router)
     app.include_router(console.router)
     app.include_router(enrollments.router)
@@ -148,4 +151,5 @@ def create_app() -> FastAPI:
                 return FileResponse(asset)
             return _spa_index()
 
+    app.add_middleware(ForwardedProxyMiddleware)
     return app

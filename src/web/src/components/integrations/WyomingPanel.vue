@@ -46,6 +46,7 @@ type Draft = {
   tag_speaker: boolean;
   include_confidence: boolean;
   include_candidates: boolean;
+  include_sound_events: boolean;
   zeroconf_enabled: boolean;
   zeroconf_name: string;
   advertise_host: string;
@@ -86,6 +87,7 @@ const draft = ref<Draft>({
   tag_speaker: true,
   include_confidence: true,
   include_candidates: false,
+  include_sound_events: false,
   zeroconf_enabled: true,
   zeroconf_name: "openrecognition",
   advertise_host: "",
@@ -110,31 +112,46 @@ const SAMPLE_SPEAKERS = [
   { label: "Sam", confidence: 0.22 },
 ];
 
+const SAMPLE_SOUNDS = [
+  { label: "bark", confidence: 0.81 },
+  { label: "glass break", confidence: 0.44 },
+];
+
 const transcriptExample = computed(() => {
   const showName = draft.value.tag_speaker;
   const showConfidence = draft.value.include_confidence;
   const showCandidates = draft.value.include_candidates;
+  const showSounds = draft.value.include_sound_events;
   const body = "turn on the kitchen lights";
-  if (!showName && !showConfidence && !showCandidates) return body;
+  if (!showName && !showConfidence && !showCandidates && !showSounds) return body;
 
-  let rows: string[];
-  if (showCandidates) {
-    rows = SAMPLE_SPEAKERS.map((item) =>
+  const blocks: string[] = [];
+  if (showName || showConfidence || showCandidates) {
+    let rows: string[];
+    if (showCandidates) {
+      rows = SAMPLE_SPEAKERS.map((item) =>
+        showConfidence ? `${item.label}: ${Math.round(item.confidence * 100)}%` : item.label,
+      );
+    } else if (showName) {
+      rows = [showConfidence ? "Luke: 92%" : "Luke"];
+    } else {
+      rows = ["92%"];
+    }
+    const named = showCandidates || showName;
+    const title = named && showConfidence
+      ? "[speaker|confidence]"
+      : named
+        ? "[speaker]"
+        : "[confidence]";
+    blocks.push(`${title}\n${rows.join("\n")}`);
+  }
+  if (showSounds) {
+    const rows = SAMPLE_SOUNDS.map((item) =>
       showConfidence ? `${item.label}: ${Math.round(item.confidence * 100)}%` : item.label,
     );
-  } else if (showName) {
-    rows = [showConfidence ? "Luke: 92%" : "Luke"];
-  } else {
-    rows = ["92%"];
+    blocks.push(`[sounds]\n${rows.join("\n")}`);
   }
-
-  const named = showCandidates || showName;
-  const title = named && showConfidence
-    ? "[speaker|confidence]"
-    : named
-      ? "[speaker]"
-      : "[confidence]";
-  return `${title}\n${rows.join("\n")}\n\n[transcript]\n${body}`;
+  return `${blocks.join("\n\n")}\n\n[transcript]\n${body}`;
 });
 
 const haConnectHost = computed(() => {
@@ -182,6 +199,7 @@ const dirty = computed(() => {
     draft.value.tag_speaker !== s.tag_speaker ||
     draft.value.include_confidence !== s.include_confidence ||
     draft.value.include_candidates !== s.include_candidates ||
+    draft.value.include_sound_events !== s.include_sound_events ||
     draft.value.zeroconf_enabled !== s.zeroconf_enabled ||
     draft.value.zeroconf_name !== s.zeroconf_name ||
     (draft.value.advertise_host.trim() || null) !== (s.advertise_host?.trim() || null)
@@ -365,6 +383,7 @@ function applyFromServer(s: WyomingIntegrationOut) {
     tag_speaker: s.tag_speaker,
     include_confidence: Boolean(s.include_confidence),
     include_candidates: Boolean(s.include_candidates),
+    include_sound_events: Boolean(s.include_sound_events),
     zeroconf_enabled: s.zeroconf_enabled,
     zeroconf_name: s.zeroconf_name,
     advertise_host: s.advertise_host ?? "",
@@ -403,6 +422,7 @@ async function save() {
           tag_speaker: draft.value.tag_speaker,
           include_confidence: draft.value.include_confidence,
           include_candidates: draft.value.include_candidates,
+          include_sound_events: draft.value.include_sound_events,
           zeroconf_enabled: draft.value.zeroconf_enabled,
           zeroconf_name: draft.value.zeroconf_name,
           advertise_host: draft.value.advertise_host.trim() || null,
@@ -635,13 +655,24 @@ onMounted(async () => {
           <NSwitch v-model:value="draft.include_candidates" />
         </div>
 
+        <div class="conn-switch">
+          <div class="conn-switch__copy">
+            <span class="conn-switch__label">Add sound-event labels</span>
+            <p class="conn-switch__hint">
+              Puts bark, glass break, doorbell, and similar labels in a <code>[sounds]</code> block
+              when YAMNet is installed on Models.
+            </p>
+          </div>
+          <NSwitch v-model:value="draft.include_sound_events" />
+        </div>
+
         <div
-          v-if="draft.tag_speaker || draft.include_confidence || draft.include_candidates"
+          v-if="draft.tag_speaker || draft.include_confidence || draft.include_candidates || draft.include_sound_events"
           class="conn-field"
         >
           <span class="conn-field__label">Example message</span>
           <p class="conn-field__hint">
-            Speaker list first. After a blank line, <code>[transcript]</code> marks the spoken words.
+            Speaker and sound labels first. After a blank line, <code>[transcript]</code> marks the spoken words.
           </p>
           <pre class="wh-json">{{ transcriptExample }}</pre>
         </div>

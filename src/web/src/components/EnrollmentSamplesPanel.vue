@@ -29,9 +29,13 @@ import Chip from "@/components/kit/Chip.vue";
 import TimeAgo from "@/components/kit/TimeAgo.vue";
 import EmptyState from "@/components/EmptyState.vue";
 
-const props = defineProps<{
-  enrollmentId: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    enrollmentId: string;
+    canManage?: boolean;
+  }>(),
+  { canManage: true },
+);
 
 const emit = defineEmits<{
   updated: [enrollment: EnrollmentOut];
@@ -244,7 +248,7 @@ async function deleteFromDetail() {
 }
 
 const columns = computed<DataTableColumns<SampleOut>>(() => [
-  { type: "selection" },
+  ...(props.canManage ? [{ type: "selection" as const }] : []),
   {
     title: "Source",
     key: "source_label",
@@ -299,11 +303,13 @@ const columns = computed<DataTableColumns<SampleOut>>(() => [
       return h(TimeAgo, { value: row.created_at });
     },
   },
+  ...(props.canManage
+    ? [
   {
     title: "",
     key: "actions",
     width: 56,
-    render(row) {
+    render(row: SampleOut) {
       return h(
         "div",
         {
@@ -333,6 +339,8 @@ const columns = computed<DataTableColumns<SampleOut>>(() => [
       );
     },
   },
+    ]
+    : []),
 ]);
 
 onMounted(load);
@@ -398,7 +406,7 @@ defineExpose({ reload: load });
       />
     </FilterBar>
 
-    <div v-if="selectionCount > 0" class="bulk-bar">
+    <div v-if="canManage && selectionCount > 0" class="bulk-bar">
       <span class="bulk-count">{{ selectionCount }} selected</span>
       <NSpace :size="8">
         <NButton size="small" quaternary @click="checkedRowKeys = []">Clear selection</NButton>
@@ -444,6 +452,7 @@ defineExpose({ reload: load });
       v-model:show="showDetailModal"
       :sample="detailSample"
       :deleting="detailSample != null && deletingId === detailSample.id"
+      :can-delete="canManage"
       @delete="deleteFromDetail"
     />
   </div>

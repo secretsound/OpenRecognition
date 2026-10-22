@@ -12,14 +12,16 @@ withDefaults(
 <template>
   <header class="or-page-header" :class="{ 'or-page-header--prose': width === 'prose' }">
     <div class="or-page-header__row">
-      <div class="or-page-header__copy">
+      <div class="or-page-header__identity">
         <div v-if="$slots.lead" class="or-page-header__lead">
           <slot name="lead" />
         </div>
-        <h1 class="or-title">{{ title }}</h1>
-        <p v-if="description" class="or-page-header__desc">{{ description }}</p>
-        <div v-if="$slots.meta" class="or-page-header__meta">
-          <slot name="meta" />
+        <div class="or-page-header__copy">
+          <h1 class="or-title">{{ title }}</h1>
+          <p v-if="description" class="or-page-header__desc">{{ description }}</p>
+          <div v-if="$slots.meta" class="or-page-header__meta">
+            <slot name="meta" />
+          </div>
         </div>
       </div>
       <div v-if="$slots.action" class="or-page-header__action">

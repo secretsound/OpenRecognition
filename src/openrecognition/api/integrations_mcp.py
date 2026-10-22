@@ -40,6 +40,10 @@ HOST_CONFIG_HINTS = [
 
 def public_api_base_url(state: AppState, request: Request | None = None) -> str:
     """Address an MCP client should call — never 0.0.0.0."""
+    configured = getattr(state.settings, "public_url", "") or ""
+    configured = configured.strip().rstrip("/")
+    if configured:
+        return configured
     host = state.settings.host
     if host in ("0.0.0.0", "::", "[::]"):
         host = "127.0.0.1"
@@ -52,7 +56,7 @@ def public_api_base_url(state: AppState, request: Request | None = None) -> str:
     # Browser-proxied Vite hosts are not the API. Keep the listen port.
     if ":" in req_host.rsplit("]", 1)[-1] and req_host.rsplit(":", 1)[-1] != str(state.settings.port):
         return configured
-    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+    scheme = request.url.scheme
     return f"{scheme}://{req_host}".rstrip("/")
 
 

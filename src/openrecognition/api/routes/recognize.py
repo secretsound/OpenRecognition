@@ -83,6 +83,49 @@ async def _dispatch(
         await state.webhooks.dispatch_recognition(event, payload, dry_run=True)
 
 
+def _score_map(scores) -> dict[str, float] | None:
+    if not scores:
+        return None
+    if hasattr(scores, "model_dump"):
+        scores = scores.model_dump()
+    return {key: round(float(value), 4) for key, value in scores.items() if value is not None}
+
+
+def _speaker_log_details(
+    candidates: list[dict] | None,
+    *,
+    min_confidence: float,
+    scores,
+    attempted: bool,
+) -> dict:
+    """Scores and the bar each enrollment actually had to clear."""
+    rows = []
+    for item in (candidates or [])[:8]:
+        label = item.get("label")
+        if not label or str(label).lower() == "unknown":
+            continue
+        row = {
+            "label": label,
+            "entity_id": item.get("entity_id"),
+            "confidence": round(float(item.get("confidence") or 0.0), 4),
+            "accepted": bool(item.get("accepted")),
+        }
+        used = item.get("threshold_used")
+        if used is not None:
+            row["threshold_used"] = round(float(used), 4)
+        rows.append(row)
+    details: dict = {
+        "default_min_confidence": min_confidence,
+        "min_confidence": min_confidence,
+        "speaker_match_attempted": attempted or bool(rows),
+        "speaker_candidates": rows,
+    }
+    mapped = _score_map(scores)
+    if mapped:
+        details["gate_scores"] = mapped
+    return details
+
+
 def _log_recognition(
     state: AppState,
     event: str,
@@ -92,6 +135,7 @@ def _log_recognition(
     auth: dict | None,
     modality: str | None = None,
     summary: str | None = None,
+    details: dict | None = None,
 ) -> None:
     """Persist audit log entry (always, including sandbox / dry_run tests)."""
     meta = response.meta.model_dump()
@@ -104,6 +148,7 @@ def _log_recognition(
             reason=response.reason,
             dry_run=dry_run,
             auth=auth,
+            details=details,
         )
     else:
         state.recognition_logs.record(
@@ -118,6 +163,7 @@ def _log_recognition(
             latency_ms=meta.get("latency_ms"),
             dry_run=dry_run,
             auth=auth,
+            details=details,
         )
 
 
@@ -182,6 +228,8 @@ async def recognize_audio(
             summary=f"Gate-only check: {gate.gate}",
         )
         return resp
+    ranked: list[dict] = []
+    speaker_attempted = False
     if gate.gate == "accept" and mode in ("identify", "full"):
         speaker_block = state.inference_policy.identity_blocked("speaker_embedding")
         gallery = state.gallery.get_embeddings_for_match(modality="audio")
@@ -203,6 +251,7 @@ async def recognize_audio(
                 alternates=speaker_alternates(state, gallery),
             )
             ranked = outcome["candidates"]
+            speaker_attempted = True
             for m in outcome["matches"]:
                 entities.append(EntityResult(**m))
             if (
@@ -236,7 +285,8 @@ async def recognize_audio(
                     notes=notes,
                 )
         if sound_events:
-            entities.extend(classify_sound_events(data))
+            session = state.inference_policy.get_session("audio_gate_classifier")
+            entities.extend(classify_sound_events(data, session=session))
     elif include_candidates and gate.gate != "accept":
         diagnostics = RecognizeDiagnostics(
             pipelines=[],
@@ -260,6 +310,12 @@ async def recognize_audio(
             dry_run=dry_run,
         ),
     )
+    log_details = _speaker_log_details(
+        ranked,
+        min_confidence=min_confidence,
+        scores=gate.scores,
+        attempted=speaker_attempted,
+    )
     if gate.gate != "accept":
         _log_recognition(
             state,
@@ -269,13 +325,14 @@ async def recognize_audio(
             auth=auth,
             modality="audio",
             summary=gate.reason or "Audio gate rejected",
+            details=log_details,
         )
         await _dispatch(
             state, "recognition.gate_reject", resp, dry_run, auth, extras={"mode": mode}
         )
     elif entities:
         event = "recognition.unknown" if entities[0].label == "unknown" else "recognition.match"
-        _log_recognition(state, event, resp, dry_run=dry_run, auth=auth)
+        _log_recognition(state, event, resp, dry_run=dry_run, auth=auth, details=log_details)
         await _dispatch(state, event, resp, dry_run, auth, extras={"mode": mode})
     else:
         _log_recognition(
@@ -286,6 +343,7 @@ async def recognize_audio(
             auth=auth,
             modality="audio",
             summary="No speaker matched the gallery",
+            details=log_details,
         )
         await _dispatch(
             state, "recognition.no_match", resp, dry_run, auth, extras={"mode": mode}

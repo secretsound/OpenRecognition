@@ -2,11 +2,12 @@
 defineProps<{
   label: string;
   hint?: string;
+  stack?: boolean;
 }>();
 </script>
 
 <template>
-  <div class="setting-row">
+  <div class="setting-row" :class="{ 'is-stack': stack }">
     <div class="setting-row__main">
       <span class="setting-row__label">{{ label }}</span>
       <div class="setting-row__control">
@@ -51,6 +52,15 @@ defineProps<{
 
 .setting-row__control {
   flex-shrink: 0;
+}
+
+.setting-row.is-stack .setting-row__main {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.setting-row.is-stack .setting-row__control {
+  width: 100%;
 }
 
 .setting-row__hint {

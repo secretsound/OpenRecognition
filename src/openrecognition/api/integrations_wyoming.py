@@ -19,6 +19,7 @@ def wyoming_settings_out(state: AppState) -> dict:
         "tag_speaker": s.wyoming_tag_speaker,
         "include_confidence": s.wyoming_include_confidence,
         "include_candidates": s.wyoming_include_candidates,
+        "include_sound_events": s.wyoming_include_sound_events,
         "zeroconf_enabled": s.wyoming_zeroconf_enabled,
         "zeroconf_name": s.wyoming_zeroconf_name,
         "advertise_host": s.wyoming_advertise_host or None,
@@ -64,6 +65,8 @@ def apply_wyoming_patch(state: AppState, body: WyomingIntegrationPatch) -> bool:
         s.wyoming_include_confidence = body.include_confidence
     if body.include_candidates is not None:
         s.wyoming_include_candidates = body.include_candidates
+    if body.include_sound_events is not None:
+        s.wyoming_include_sound_events = body.include_sound_events
     if body.zeroconf_enabled is not None:
         restart = restart or body.zeroconf_enabled != s.wyoming_zeroconf_enabled
         s.wyoming_zeroconf_enabled = body.zeroconf_enabled
@@ -86,6 +89,7 @@ def apply_wyoming_patch(state: AppState, body: WyomingIntegrationPatch) -> bool:
         tag_speaker=s.wyoming_tag_speaker,
         include_confidence=s.wyoming_include_confidence,
         include_candidates=s.wyoming_include_candidates,
+        include_sound_events=s.wyoming_include_sound_events,
         zeroconf_enabled=s.wyoming_zeroconf_enabled,
         zeroconf_name=s.wyoming_zeroconf_name,
         advertise_host=s.wyoming_advertise_host,

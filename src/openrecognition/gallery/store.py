@@ -55,13 +55,14 @@ class GalleryStore:
         threshold: float | None = None,
         enabled: bool = True,
         model_version: str = "v1",
+        created_by: str | None = None,
     ) -> dict[str, Any]:
         eid = str(uuid.uuid4())
         now = _now()
         self.db.execute(
             """INSERT INTO enrollments
-               (id, type, label, species_hint, enabled, threshold, model_version, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, type, label, species_hint, enabled, threshold, model_version, created_at, updated_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 eid,
                 etype.value,
@@ -72,6 +73,7 @@ class GalleryStore:
                 model_version,
                 now,
                 now,
+                created_by,
             ),
         )
         return self.get_enrollment(eid)
@@ -135,7 +137,24 @@ class GalleryStore:
             "sample_count": samples["c"] if samples else 0,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "created_by": _row_get(row, "created_by"),
         }
+
+    def enrollment_ids_created_by(self, user_id: str) -> set[str]:
+        rows = self.db.fetchall(
+            "SELECT id FROM enrollments WHERE created_by = ?",
+            (user_id,),
+        )
+        return {row["id"] for row in rows}
+
+    def enrollment_owner(self, enrollment_id: str) -> str | None:
+        row = self.db.fetchone(
+            "SELECT created_by FROM enrollments WHERE id = ?",
+            (enrollment_id,),
+        )
+        if not row:
+            return None
+        return row["created_by"]
 
     def patch_enrollment(self, eid: str, **kwargs) -> dict[str, Any] | None:
         en = self.get_enrollment(eid)

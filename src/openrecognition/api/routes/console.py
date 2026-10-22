@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from openrecognition.api.deps import get_state, require_scope
+from openrecognition.api.deps import get_state, library_limited_ids, require_scope
 from openrecognition.api.routes.enrollments import _to_out
 from openrecognition.app_state import AppState
 from openrecognition.models.schemas import (
@@ -36,9 +36,12 @@ def _presence_entry(row: dict) -> PresenceEntry:
 @router.get("/overview", response_model=ConsoleOverviewOut)
 def console_overview(
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("read")),
+    auth=Depends(require_scope("read")),
 ):
     rows = state.gallery.list_enrollments()
+    allowed = library_limited_ids(state, auth)
+    if allowed is not None:
+        rows = [e for e in rows if e["id"] in allowed]
     quality = state.gallery.evaluate_many(rows)
     seen = state.gallery.presence_map()
     enrollments = [
@@ -47,11 +50,17 @@ def console_overview(
     attention = [e for e in enrollments if _needs_attention(e)][:6]
     ready_count = sum(1 for e in enrollments if e.enabled and e.quality and e.quality.usable)
 
-    items, _total = state.recognition_logs.list_logs(limit=8, offset=0)
+    items, _total = state.recognition_logs.list_logs(
+        limit=8,
+        offset=0,
+        entity_ids=list(allowed) if allowed is not None else None,
+    )
     recent = [RecognitionLogOut(**row) for row in items]
     has_recognition = state.recognition_logs.has_recognition()
 
     presence_rows = state.gallery.list_presence()
+    if allowed is not None:
+        presence_rows = [p for p in presence_rows if p["enrollment_id"] in allowed]
     last_seen = _presence_entry(presence_rows[0]) if presence_rows else None
 
     models = state.pool.list_models()

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from openrecognition.auth.groups import GroupStore
 from openrecognition.auth.keys import ApiKeyService
 from openrecognition.auth.rate_limit import LoginRateLimiter
 from openrecognition.auth.sessions import SessionService
@@ -20,19 +21,14 @@ from openrecognition.integrator.mqtt import MqttBridge
 from openrecognition.integrator.wyoming import WyomingBridge
 from openrecognition.integrator.recognition_log import RecognitionLogService
 from openrecognition.integrator.webhooks import WebhookService
-from openrecognition.runtime_settings import RuntimeSettingsStore
-
-RESTART_REQUIRED_KEYS = (
-    "data_dir",
-    "models_dir",
-    "model_packs_dir",
-    "host",
-    "port",
-    "auth_required",
-    "web_enabled",
-    "docs_enabled",
-    "web_origin",
+from openrecognition.boot_settings import (
+    apply_boot_overrides,
+    apply_site_snapshot,
+    capture_boot_state,
+    site_snapshot,
 )
+from openrecognition.logging_config import apply_runtime_logging
+from openrecognition.runtime_settings import RuntimeSettingsStore
 
 
 @dataclass
@@ -42,6 +38,7 @@ class AppState:
     gallery: GalleryStore
     api_keys: ApiKeyService
     sessions: SessionService
+    groups: GroupStore
     pool: ModelSessionPool
     inference_policy: InferencePolicy
     gate: AudioGateEngine
@@ -100,6 +97,7 @@ class AppState:
             "wyoming_tag_speaker": s.wyoming_tag_speaker,
             "wyoming_include_confidence": s.wyoming_include_confidence,
             "wyoming_include_candidates": s.wyoming_include_candidates,
+            "wyoming_include_sound_events": s.wyoming_include_sound_events,
             "wyoming_zeroconf_enabled": s.wyoming_zeroconf_enabled,
             "wyoming_zeroconf_name": s.wyoming_zeroconf_name,
             "wyoming_advertise_host": s.wyoming_advertise_host,
@@ -107,7 +105,7 @@ class AppState:
             "model_idle_unload_minutes": s.model_idle_unload_minutes,
             "hardware_tier": self.hardware_override,
             "onnx_intra_op_threads": self.thread_override,
-        }
+        } | site_snapshot(s)
 
     def apply_runtime_snapshot(self, data: dict[str, Any]) -> None:
         if not data:
@@ -195,6 +193,7 @@ class AppState:
             "wyoming_tag_speaker",
             "wyoming_include_confidence",
             "wyoming_include_candidates",
+            "wyoming_include_sound_events",
             "wyoming_zeroconf_enabled",
             "wyoming_zeroconf_name",
             "wyoming_advertise_host",
@@ -214,6 +213,7 @@ class AppState:
                 tag_speaker=s.wyoming_tag_speaker,
                 include_confidence=s.wyoming_include_confidence,
                 include_candidates=s.wyoming_include_candidates,
+                include_sound_events=s.wyoming_include_sound_events,
                 zeroconf_enabled=s.wyoming_zeroconf_enabled,
                 zeroconf_name=s.wyoming_zeroconf_name,
                 advertise_host=s.wyoming_advertise_host,
@@ -228,6 +228,7 @@ class AppState:
             raw = data["onnx_intra_op_threads"]
             self.thread_override = int(raw) if raw else None
             self.apply_threads()
+        apply_site_snapshot(s, data)
 
     def persist_runtime(self) -> None:
         if self._runtime_store is not None:
@@ -284,11 +285,14 @@ class AppState:
 
     @classmethod
     def create(cls, settings: Settings) -> "AppState":
+        apply_boot_overrides(settings)
         run_bootstrap(settings)
         db = Database(settings.db_path)
         gallery = GalleryStore(db, settings.data_dir)
         api_keys = ApiKeyService(db)
         sessions = SessionService(db, settings.session_ttl_minutes)
+        groups = GroupStore(db)
+        sessions.groups = groups
         pool = ModelSessionPool(
             settings.models_dir,
             settings.model_idle_unload_minutes,
@@ -303,6 +307,7 @@ class AppState:
             gallery=gallery,
             api_keys=api_keys,
             sessions=sessions,
+            groups=groups,
             pool=pool,
             inference_policy=policy,
             gate=AudioGateEngine(pool, policy),
@@ -334,6 +339,7 @@ class AppState:
                 tag_speaker=settings.wyoming_tag_speaker,
                 include_confidence=settings.wyoming_include_confidence,
                 include_candidates=settings.wyoming_include_candidates,
+                include_sound_events=settings.wyoming_include_sound_events,
                 zeroconf_enabled=settings.wyoming_zeroconf_enabled,
                 zeroconf_name=settings.wyoming_zeroconf_name,
                 advertise_host=settings.wyoming_advertise_host,
@@ -342,6 +348,8 @@ class AppState:
         )
         state._runtime_store = RuntimeSettingsStore(settings.data_dir / "runtime_settings.json")
         state.apply_runtime_snapshot(state._runtime_store.load())
+        apply_runtime_logging(settings)
+        capture_boot_state(settings)
         state.gallery.set_version_resolver(state.resolve_embedding_model_version)
         from openrecognition.gallery.model_registry import bind_active
 

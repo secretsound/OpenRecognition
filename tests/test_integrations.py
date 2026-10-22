@@ -130,6 +130,7 @@ def test_wyoming_integration(client, auth_headers):
     assert body["tag_speaker"] is True
     assert body["include_confidence"] is True
     assert body["include_candidates"] is False
+    assert body["include_sound_events"] is False
 
     r2 = client.patch(
         "/v1/integrations/wyoming",

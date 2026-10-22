@@ -71,6 +71,7 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         ("learn_daily_cap", "INTEGER NOT NULL DEFAULT 8"),
         ("learn_max_samples", "INTEGER NOT NULL DEFAULT 20"),
         ("wyoming_min_confidence", "REAL"),
+        ("created_by", "TEXT"),
     ]
     enroll_cols = _columns(conn, "enrollments")
     for name, ddl in learn_columns:
@@ -152,6 +153,47 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         )"""
     )
 
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS groups (
+            id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            grants_role TEXT,
+            sso_name TEXT UNIQUE,
+            system INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS group_members (
+            group_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            PRIMARY KEY (group_id, user_id),
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS group_enrollments (
+            group_id TEXT NOT NULL,
+            enrollment_id TEXT NOT NULL,
+            can_add_samples INTEGER NOT NULL DEFAULT 0,
+            can_manage INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (group_id, enrollment_id),
+            FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+            FOREIGN KEY (enrollment_id) REFERENCES enrollments(id) ON DELETE CASCADE
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_group_enrollments_enrollment ON group_enrollments(enrollment_id)"
+    )
+    from openrecognition.auth.groups import seed_system_groups
+
+    seed_system_groups(conn)
+
     webhook_cols = _columns(conn, "webhook_subscriptions")
     webhook_additions = [
         ("name", "TEXT NOT NULL DEFAULT ''"),
@@ -162,3 +204,21 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     for name, ddl in webhook_additions:
         if name not in webhook_cols:
             conn.execute(f"ALTER TABLE webhook_subscriptions ADD COLUMN {name} {ddl}")
+
+    user_cols = _columns(conn, "users")
+    for name, ddl in (
+        ("sso_subject", "TEXT"),
+        ("sso_protocol", "TEXT"),
+    ):
+        if name not in user_cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_sso_subject ON users(sso_subject)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS sso_login_states (
+            id TEXT PRIMARY KEY,
+            payload TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )"""
+    )

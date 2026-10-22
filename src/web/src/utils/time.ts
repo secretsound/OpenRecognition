@@ -1,11 +1,21 @@
 const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
-const absolute = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+let timeZone = "UTC";
+let locales: string | undefined;
 
-const timeOnly = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+/** Installation time zone used for console dates. Stored records stay in UTC. */
+export function setDisplayTimeZone(zone: string) {
+  const next = zone.trim();
+  timeZone = next || "UTC";
+}
+
+export function setDisplayLocale(code: string) {
+  locales = code.trim() || undefined;
+}
+
+function stamp(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  return { ...options, timeZone };
+}
 
 export function parseDate(value: string | number | Date): Date | null {
   const d = value instanceof Date ? value : new Date(value);
@@ -22,21 +32,33 @@ export function formatRelative(value: string | number | Date, now = Date.now()):
   if (abs < 3600) return rtf.format(Math.round(diff / 60), "minute");
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), "hour");
   if (abs < 86400 * 7) return rtf.format(Math.round(diff / 86400), "day");
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locales, stamp({
     month: "short",
     day: "numeric",
     year: d.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric",
-  }).format(d);
+  })).format(d);
 }
 
 export function formatAbsolute(value: string | number | Date): string {
   const d = parseDate(value);
-  return d ? absolute.format(d) : "—";
+  return d ? new Intl.DateTimeFormat(locales, stamp({ dateStyle: "medium", timeStyle: "short" })).format(d) : "—";
+}
+
+export function formatPrecise(value: string | number | Date): string {
+  const d = parseDate(value);
+  return d ? new Intl.DateTimeFormat(locales, stamp({ dateStyle: "medium", timeStyle: "medium" })).format(d) : "—";
 }
 
 export function formatTime(value: string | number | Date): string {
   const d = parseDate(value);
-  return d ? timeOnly.format(d) : "—";
+  return d ? new Intl.DateTimeFormat(locales, stamp({ timeStyle: "short" })).format(d) : "—";
+}
+
+export function formatClock(value: string | number | Date): string {
+  const d = parseDate(value);
+  return d
+    ? new Intl.DateTimeFormat(locales, stamp({ hour: "numeric", minute: "2-digit", second: "2-digit" })).format(d)
+    : "—";
 }
 
 export function formatDuration(ms: number | null | undefined): string {

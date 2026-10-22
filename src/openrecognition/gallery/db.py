@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    sso_subject TEXT,
+    sso_protocol TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -43,7 +45,8 @@ CREATE TABLE IF NOT EXISTS enrollments (
     model_version TEXT,
     centroid BLOB,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    created_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS embeddings (
@@ -106,8 +109,38 @@ CREATE TABLE IF NOT EXISTS debounce_state (
     last_fired_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    grants_role TEXT,
+    sso_name TEXT UNIQUE,
+    system INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS group_members (
+    group_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    PRIMARY KEY (group_id, user_id),
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS group_enrollments (
+    group_id TEXT NOT NULL,
+    enrollment_id TEXT NOT NULL,
+    can_add_samples INTEGER NOT NULL DEFAULT 0,
+    can_manage INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (group_id, enrollment_id),
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (enrollment_id) REFERENCES enrollments(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_embeddings_enrollment ON embeddings(enrollment_id);
 CREATE INDEX IF NOT EXISTS idx_enrollments_type ON enrollments(type);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_group_enrollments_enrollment ON group_enrollments(enrollment_id);
 """
 
 

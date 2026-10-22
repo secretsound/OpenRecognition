@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from "vue";
+import { computed, h, onMounted, ref } from "vue";
 import {
   NDataTable,
   NButton,
@@ -16,8 +16,9 @@ import {
 import type { DataTableColumns, FormInst, SelectOption } from "naive-ui";
 import { AddOutline, TrashOutline, CreateOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
-import type { UserOut } from "@/types/api";
+import type { GroupOut, UserOut } from "@/types/api";
 import PageHeader from "@/components/kit/PageHeader.vue";
+import { formatAbsolute } from "@/utils/time";
 import DataList from "@/components/kit/DataList.vue";
 import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -30,6 +31,7 @@ const { username: currentUsername } = useAuth();
 const loading = ref(true);
 const loadError = ref<string | null>(null);
 const rows = ref<UserOut[]>([]);
+const groups = ref<GroupOut[]>([]);
 const showCreate = ref(false);
 const showEdit = ref(false);
 const creating = ref(false);
@@ -41,12 +43,21 @@ const createForm = ref({
   username: "",
   password: "",
   role: "operator",
+  groupIds: [] as string[],
 });
 
 const editForm = ref({
   role: "operator",
   password: "",
+  groupIds: [] as string[],
 });
+
+const groupOptions = computed<SelectOption[]>(() =>
+  groups.value.map((g) => ({
+    label: g.grants_role ? `${g.name} (${g.grants_role})` : g.name,
+    value: g.id,
+  })),
+);
 
 const roleOptions: SelectOption[] = [
   { label: "Admin — full access", value: "admin" },
@@ -94,12 +105,28 @@ const columns: DataTableColumns<UserOut> = [
     },
   },
   {
+    title: "Groups",
+    key: "groups",
+    minWidth: 160,
+    render(row) {
+      const names = (row.groups ?? []).map((g) => g.name);
+      if (!names.length) return "—";
+      return h(
+        "span",
+        {},
+        names.map((name) =>
+          h(NTag, { size: "small", round: true, bordered: false, style: "margin-right: 6px" }, () => name),
+        ),
+      );
+    },
+  },
+  {
     title: "Created",
     key: "created_at",
     width: 168,
     sorter: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     render(row) {
-      return new Date(row.created_at).toLocaleString();
+      return formatAbsolute(row.created_at);
     },
   },
   {
@@ -146,7 +173,12 @@ async function load() {
   loading.value = true;
   loadError.value = null;
   try {
-    rows.value = await api<UserOut[]>("/v1/auth/users");
+    const [userRows, groupRows] = await Promise.all([
+      api<UserOut[]>("/v1/auth/users"),
+      api<GroupOut[]>("/v1/auth/groups"),
+    ]);
+    rows.value = userRows;
+    groups.value = groupRows;
   } catch (e) {
     loadError.value = loadFailureMessage(e, "Failed to load users");
     message.error(loadError.value);
@@ -165,11 +197,12 @@ async function create() {
         username: createForm.value.username.trim(),
         password: createForm.value.password,
         role: createForm.value.role,
+        group_ids: createForm.value.groupIds,
       },
     });
     message.success("User created");
     showCreate.value = false;
-    createForm.value = { username: "", password: "", role: "operator" };
+    createForm.value = { username: "", password: "", role: "operator", groupIds: [] };
     await load();
   } catch (e) {
     message.error(e instanceof ApiError ? e.message : "Failed to create user");
@@ -178,26 +211,41 @@ async function create() {
   }
 }
 
+function sameGroups(a: string[], b: string[]) {
+  return [...a].sort().join() === [...b].sort().join();
+}
+
 function openEdit(user: UserOut) {
   editingUser.value = user;
-  editForm.value = { role: user.role, password: "" };
+  editForm.value = {
+    role: user.role,
+    password: "",
+    groupIds: (user.groups ?? []).map((g) => g.id),
+  };
   showEdit.value = true;
 }
 
 async function saveEdit() {
   if (!editingUser.value) return;
-  if (!editForm.value.password && editForm.value.role === editingUser.value.role) {
-    message.warning("Change role or set a new password");
+  const groupsChanged = !sameGroups(
+    editForm.value.groupIds,
+    (editingUser.value.groups ?? []).map((g) => g.id),
+  );
+  if (!editForm.value.password && editForm.value.role === editingUser.value.role && !groupsChanged) {
+    message.warning("Change role, groups, or set a new password");
     return;
   }
   saving.value = true;
   try {
-    const patch: { role?: string; password?: string } = {};
+    const patch: { role?: string; password?: string; group_ids?: string[] } = {};
     if (editForm.value.role !== editingUser.value.role) {
       patch.role = editForm.value.role;
     }
     if (editForm.value.password) {
       patch.password = editForm.value.password;
+    }
+    if (groupsChanged) {
+      patch.group_ids = editForm.value.groupIds;
     }
     await api<UserOut>(`/v1/auth/users/${editingUser.value.id}`, {
       method: "PATCH",
@@ -280,6 +328,7 @@ onMounted(load);
             </span>
             <span class="or-list-card__meta">
               <NTag size="small" round :bordered="false" :type="roleTagType(item.role)">{{ item.role }}</NTag>
+              <span v-if="item.groups?.length" class="or-muted">{{ item.groups.map((g) => g.name).join(", ") }}</span>
               <NButton size="small" quaternary :aria-label="`Edit ${item.username}`" @click="openEdit(item)">
                 Edit
               </NButton>
@@ -317,6 +366,15 @@ onMounted(load);
         <NFormItem label="Role">
           <NSelect v-model:value="createForm.role" :options="roleOptions" />
         </NFormItem>
+        <NFormItem label="Groups">
+          <NSelect
+            v-model:value="createForm.groupIds"
+            multiple
+            filterable
+            :options="groupOptions"
+            placeholder="Optional"
+          />
+        </NFormItem>
       </NForm>
       <template #footer>
         <div class="or-modal-footer">
@@ -335,6 +393,15 @@ onMounted(load);
       <NForm ref="editFormRef" :model="editForm" label-placement="top">
         <NFormItem label="Role">
           <NSelect v-model:value="editForm.role" :options="roleOptions" />
+        </NFormItem>
+        <NFormItem label="Groups">
+          <NSelect
+            v-model:value="editForm.groupIds"
+            multiple
+            filterable
+            :options="groupOptions"
+            placeholder="None"
+          />
         </NFormItem>
         <NFormItem label="New password">
           <NInput

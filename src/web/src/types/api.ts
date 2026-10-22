@@ -166,11 +166,51 @@ export interface VideoLimits {
   max_upload_bytes: number;
 }
 
+export interface GroupBriefOut {
+  id: string;
+  name: string;
+}
+
+export interface EnrollmentGrantOut {
+  enrollment_id: string;
+  can_add_samples: boolean;
+  can_manage: boolean;
+}
+
+export interface GroupMemberOut {
+  id: string;
+  username: string;
+  role: string;
+}
+
+export interface GroupEnrollmentOut {
+  enrollment_id: string;
+  label: string;
+  type: string;
+  can_add_samples: boolean;
+  can_manage: boolean;
+}
+
+export interface GroupOut {
+  id: string;
+  name: string;
+  description: string;
+  grants_role: string | null;
+  sso_name: string | null;
+  system: boolean;
+  created_at: string;
+  member_count: number;
+  enrollment_count: number;
+  members: GroupMemberOut[];
+  enrollments: GroupEnrollmentOut[];
+}
+
 export interface UserOut {
   id: string;
   username: string;
   role: string;
   created_at: string;
+  groups?: GroupBriefOut[];
 }
 
 export interface LoginResponse {
@@ -259,6 +299,7 @@ export interface WyomingIntegrationOut {
   tag_speaker: boolean;
   include_confidence: boolean;
   include_candidates: boolean;
+  include_sound_events: boolean;
   zeroconf_enabled: boolean;
   zeroconf_name: string;
   advertise_host: string | null;
@@ -290,6 +331,7 @@ export interface WyomingIntegrationPatch {
   tag_speaker?: boolean;
   include_confidence?: boolean;
   include_candidates?: boolean;
+  include_sound_events?: boolean;
   zeroconf_enabled?: boolean;
   zeroconf_name?: string;
   advertise_host?: string | null;
@@ -328,6 +370,9 @@ export interface AuthMeOut {
   role?: string | null;
   mcp_tools: McpToolOut[];
   mcp_resources: McpResourceOut[];
+  groups?: GroupBriefOut[];
+  enrollment_grants?: EnrollmentGrantOut[];
+  library_limited?: boolean;
 }
 
 export interface IntegrationsOverviewOut {
@@ -442,6 +487,7 @@ export interface AppSettingsOut {
   web_enabled: boolean;
   data_dir: string;
   models_dir: string;
+  model_packs_dir?: string;
   session_ttl_minutes: number;
   mqtt_enabled: boolean;
   mqtt_host: string;
@@ -449,10 +495,104 @@ export interface AppSettingsOut {
   mqtt_topic_prefix: string;
   model_idle_unload_minutes: number;
   auth_rate_limit_per_minute: number;
+  display_timezone?: string;
+  log_max_mb?: number;
+  log_backup_count?: number;
+  video_max_upload_bytes?: number;
+  health_detail_public?: boolean;
+  metrics_token_set?: boolean;
   host: string;
   port: number;
+  http_enabled?: boolean;
+  https_enabled?: boolean;
+  https_port?: number;
+  tls_cert_file?: string;
+  tls_key_file?: string;
+  tls_configured?: boolean;
+  tls_readable?: boolean;
+  tls_subject?: string;
+  tls_expires_at?: string;
+  tls_error?: string;
+  public_url?: string;
+  behind_proxy?: boolean;
+  trusted_proxies?: string;
+  display_language?: string;
+  logs_dir?: string;
+  log_level?: string;
+  log_to_file?: boolean;
+  log_file?: string;
+  sso_enabled?: boolean;
+  sso_protocol?: string;
+  sso_label?: string;
+  sso_auto_provision?: boolean;
+  sso_default_role?: string;
+  sso_link_existing?: boolean;
+  sso_username_claim?: string;
+  oidc_issuer?: string;
+  oidc_client_id?: string;
+  oidc_client_secret_set?: boolean;
+  oidc_scopes?: string;
+  oidc_groups_claim?: string;
+  saml_idp_entity_id?: string;
+  saml_idp_sso_url?: string;
+  saml_idp_x509_cert?: string;
+  saml_sp_entity_id?: string;
+  saml_username_attr?: string;
+  saml_groups_attr?: string;
+  sso_redirect_uri?: string;
+  sso_acs_url?: string;
+  sso_metadata_url?: string;
+  sso_sp_entity_id?: string;
   runtime_settings_path: string;
   restart_required_for: string[];
+  restart_pending?: string[];
+  env_only?: string[];
+}
+
+export interface StorageUsageOut {
+  data_bytes: number;
+  models_bytes: number;
+  logs_bytes: number;
+}
+
+export interface BackupRestoreOut {
+  ok: boolean;
+  message: string;
+}
+
+export interface ServerLogsOut {
+  path: string;
+  level: string;
+  file_enabled: boolean;
+  lines: string[];
+}
+
+export interface UiConfigOut {
+  display_language: string;
+  display_timezone?: string;
+  sso_enabled: boolean;
+  sso_protocol: string;
+  sso_label: string;
+}
+
+export interface SelfSignedTlsOut {
+  cert_pem: string;
+  key_pem: string;
+  subject: string;
+  expires_at: string;
+}
+
+export interface OidcDiscoverOut {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  jwks_uri: string;
+}
+
+export interface SamlMetadataOut {
+  saml_idp_entity_id: string;
+  saml_idp_sso_url: string;
+  saml_idp_x509_cert: string;
 }
 
 export interface ServiceRestartOut {
@@ -473,6 +613,51 @@ export interface AppSettingsPatch {
   session_ttl_minutes?: number;
   model_idle_unload_minutes?: number;
   onnx_intra_op_threads?: number | null;
+  public_url?: string;
+  behind_proxy?: boolean;
+  trusted_proxies?: string;
+  display_language?: string;
+  display_timezone?: string;
+  auth_rate_limit_per_minute?: number;
+  video_max_upload_bytes?: number;
+  log_max_mb?: number;
+  log_backup_count?: number;
+  health_detail_public?: boolean;
+  metrics_token?: string;
+  clear_metrics_token?: boolean;
+  host?: string;
+  port?: number;
+  http_enabled?: boolean;
+  https_enabled?: boolean;
+  https_port?: number;
+  tls_cert_file?: string;
+  tls_key_file?: string;
+  tls_cert_pem?: string;
+  tls_key_pem?: string;
+  models_dir?: string;
+  model_packs_dir?: string;
+  logs_dir?: string;
+  log_level?: string;
+  log_to_file?: boolean;
+  sso_enabled?: boolean;
+  sso_protocol?: string;
+  sso_label?: string;
+  sso_auto_provision?: boolean;
+  sso_default_role?: string;
+  sso_link_existing?: boolean;
+  sso_username_claim?: string;
+  oidc_issuer?: string;
+  oidc_client_id?: string;
+  oidc_client_secret?: string;
+  clear_oidc_client_secret?: boolean;
+  oidc_scopes?: string;
+  oidc_groups_claim?: string;
+  saml_idp_entity_id?: string;
+  saml_idp_sso_url?: string;
+  saml_idp_x509_cert?: string;
+  saml_sp_entity_id?: string;
+  saml_username_attr?: string;
+  saml_groups_attr?: string;
 }
 
 export interface EntityResult {
@@ -565,6 +750,8 @@ export interface RecognitionLogSpeakerCandidate {
   entity_id?: string | null;
   confidence: number;
   accepted?: boolean;
+  /** Bar this enrollment had to clear on this match path. */
+  threshold_used?: number | null;
 }
 
 export interface RecognitionLogDetails {
@@ -574,6 +761,8 @@ export interface RecognitionLogDetails {
   upstream_skipped?: boolean;
   accepted?: boolean;
   min_confidence?: number;
+  /** Request or server bar before a per-enrollment raise or Wyoming override. */
+  default_min_confidence?: number;
   speaker_match_attempted?: boolean;
   gallery_count?: number;
   comparable_speaker_count?: number;

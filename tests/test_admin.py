@@ -116,3 +116,10 @@ def test_recognition_logs(client, auth_headers):
     assert any(e.startswith("recognition.") for e in events)
     dry_run_items = [i for i in body["items"] if i.get("dry_run")]
     assert len(dry_run_items) >= 1
+
+    created = next(item for item in body["items"] if item["event"] == "enrollment.created")
+    eid = created["entity_id"]
+    filtered = client.get(f"/v1/admin/logs?entity_id={eid}", headers=auth_headers)
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] >= 1
+    assert all(item["entity_id"] == eid for item in filtered.json()["items"])

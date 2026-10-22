@@ -1,16 +1,18 @@
 """Health endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from openrecognition import __version__
-from openrecognition.api.deps import get_state
+from openrecognition.api.deps import get_state, require_reader
 from openrecognition.app_state import AppState
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-def health(state: AppState = Depends(get_state)):
+def health(request: Request, state: AppState = Depends(get_state)):
+    if not state.settings.health_detail_public:
+        require_reader(request, state)
     docs = {}
     if state.settings.docs_enabled:
         docs = {

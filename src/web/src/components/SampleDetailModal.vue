@@ -18,13 +18,18 @@ import {
   sampleFlagLabels,
   sampleSourceLabels,
 } from "@/utils/sampleLabels";
+import { formatAbsolute } from "@/utils/time";
 
 const show = defineModel<boolean>("show", { required: true });
 
-const props = defineProps<{
-  sample: SampleOut | null;
-  deleting?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    sample: SampleOut | null;
+    deleting?: boolean;
+    canDelete?: boolean;
+  }>(),
+  { canDelete: true },
+);
 
 const emit = defineEmits<{
   delete: [];
@@ -125,7 +130,7 @@ function modalityLabel(mod: string): string {
           <span v-else class="muted">None</span>
         </NDescriptionsItem>
         <NDescriptionsItem label="Added">
-          {{ new Date(sample.created_at).toLocaleString() }}
+          {{ formatAbsolute(sample.created_at) }}
         </NDescriptionsItem>
         <NDescriptionsItem label="Sample ID">
           <code class="mono">{{ sample.id }}</code>
@@ -136,7 +141,7 @@ function modalityLabel(mod: string): string {
     <template #footer>
       <NSpace justify="end">
         <NButton @click="show = false">Close</NButton>
-        <NPopconfirm v-if="sample" @positive-click="emit('delete')">
+        <NPopconfirm v-if="sample && canDelete" @positive-click="emit('delete')">
           <template #trigger>
             <NButton type="error" :loading="deleting">Delete sample</NButton>
           </template>

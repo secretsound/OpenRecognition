@@ -17,16 +17,31 @@
   gap: var(--or-space-4);
 }
 
-.or-page-header__lead {
-  margin-bottom: var(--or-space-3);
-}
-
 .or-page-header__row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--or-space-4);
   flex-wrap: wrap;
+}
+
+.or-page-header__identity {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--or-space-4);
+  min-width: 0;
+  flex: 1;
+}
+
+.or-page-header__lead {
+  display: flex;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.or-page-header__copy {
+  min-width: 0;
+  flex: 1;
 }
 
 .or-page-header__desc {
@@ -386,9 +401,9 @@ button.or-chip {
 }
 
 .or-segment__item.is-active {
-  background: var(--or-surface);
-  color: var(--or-text-1);
-  box-shadow: var(--or-shadow);
+  background: var(--or-accent);
+  color: var(--or-on-accent);
+  font-weight: 600;
 }
 
 .or-filters {

@@ -107,6 +107,13 @@ def openrecognition_details(
         "recognition_type": result.recognition_type or "speaker",
         "scores": scores,
         "candidates": candidates,
+        "sound_events": [
+            {
+                "label": row.get("label"),
+                "confidence": round(float(row.get("confidence") or 0.0), 4),
+            }
+            for row in (result.sound_events or [])
+        ],
         "transcript": transcript,
         "audio_sec": round(audio_sec, 2),
         "upstream_skipped": upstream_skipped,

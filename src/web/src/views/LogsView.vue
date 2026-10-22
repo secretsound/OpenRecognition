@@ -20,7 +20,15 @@ import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import LogDetailModal from "@/components/LogDetailModal.vue";
 import TimeAgo from "@/components/kit/TimeAgo.vue";
-import { formatLogEvent, formatLogMedia } from "@/utils/logEvent";
+import { formatLogMedia } from "@/utils/logEvent";
+import {
+  collapseActivityRows,
+  groupBlurb,
+  groupEvent,
+  groupLabel,
+  newestLog,
+  type ActivityGroup,
+} from "@/utils/activityStory";
 import { useEventStream } from "@/composables/useEventStream";
 
 const PAGE_SIZE = 40;
@@ -35,8 +43,9 @@ const total = ref(0);
 const eventFilter = ref<string | null>(null);
 const modalityFilter = ref<string | null>(null);
 const labelFilter = ref("");
-const selectedLog = ref<RecognitionLogOut | null>(null);
+const selectedLogs = ref<RecognitionLogOut[] | null>(null);
 const showDetail = ref(false);
+const groups = computed(() => collapseActivityRows(rows.value));
 
 const hasMore = computed(() => rows.value.length < total.value);
 const filtersActive = computed(
@@ -77,18 +86,14 @@ function eventTagType(event: string) {
   return "default";
 }
 
-function formatEvent(event: string) {
-  return formatLogEvent(event);
-}
-
 function formatConfidence(row: RecognitionLogOut) {
   if (row.event.startsWith("enrollment.")) return "n/a";
   if (row.confidence == null) return "—";
   return `${Math.round(row.confidence * 100)}%`;
 }
 
-function openDetail(row: RecognitionLogOut) {
-  selectedLog.value = row;
+function openDetail(group: ActivityGroup) {
+  selectedLogs.value = group.logs;
   showDetail.value = true;
 }
 
@@ -111,27 +116,33 @@ function queryParams(offset: number) {
   return params;
 }
 
-const columns: DataTableColumns<RecognitionLogOut> = [
+const columns: DataTableColumns<ActivityGroup> = [
   {
     title: "Time",
     key: "created_at",
     width: 120,
     render(row) {
-      return h(TimeAgo, { value: row.created_at });
+      const latest = newestLog(row.logs);
+      return latest ? h(TimeAgo, { value: latest.created_at }) : "—";
     },
   },
   {
     title: "Event",
     key: "event",
-    width: 188,
+    width: 220,
     render(row) {
+      const event = groupEvent(row.logs);
+      const latest = newestLog(row.logs);
       return h(NSpace, { size: 6, align: "center", wrap: false }, () => [
         h(
           NTag,
-          { size: "small", type: eventTagType(row.event), bordered: false, round: true },
-          () => formatEvent(row.event),
+          { size: "small", type: eventTagType(event.event), bordered: false, round: true },
+          () => event.label,
         ),
-        row.dry_run
+        row.logs.length > 1
+          ? h(NTag, { size: "small", bordered: false, round: true }, () => String(row.logs.length))
+          : null,
+        latest?.dry_run
           ? h(NTag, { size: "small", type: "default", bordered: false, round: true }, () => "Practice")
           : null,
       ]);
@@ -143,7 +154,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
     minWidth: 140,
     ellipsis: { tooltip: true },
     render(row) {
-      return row.label ?? "—";
+      return groupLabel(row.logs);
     },
   },
   {
@@ -152,7 +163,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
     minWidth: 180,
     ellipsis: { tooltip: true },
     render(row) {
-      return row.summary ?? row.reason ?? "—";
+      return groupBlurb(row.logs);
     },
   },
   {
@@ -160,8 +171,9 @@ const columns: DataTableColumns<RecognitionLogOut> = [
     key: "confidence",
     width: 72,
     render(row) {
-      const text = formatConfidence(row);
-      if (text === "n/a") {
+      const latest = newestLog(row.logs);
+      const text = latest ? formatConfidence(latest) : "—";
+      if (text === "n/a" || text === "—") {
         return h("span", { class: "muted-cell" }, text);
       }
       return text;
@@ -172,7 +184,7 @@ const columns: DataTableColumns<RecognitionLogOut> = [
     key: "modality",
     width: 88,
     render(row) {
-      return formatLogMedia(row.modality);
+      return formatLogMedia(newestLog(row.logs)?.modality);
     },
   },
   {
@@ -181,7 +193,8 @@ const columns: DataTableColumns<RecognitionLogOut> = [
     minWidth: 140,
     ellipsis: { tooltip: true },
     render(row) {
-      return formatActor(row);
+      const latest = newestLog(row.logs);
+      return latest ? formatActor(latest) : "—";
     },
   },
   {
@@ -356,7 +369,7 @@ onMounted(load);
     <div v-else class="or-table-wrap logs-table">
       <NDataTable
         :columns="columns"
-        :data="rows"
+        :data="groups"
         :loading="loading && !loadingMore"
         :bordered="false"
         flex-height
@@ -365,15 +378,15 @@ onMounted(load);
         :min-row-height="48"
         :scroll-x="980"
         size="medium"
-        :row-key="(row: RecognitionLogOut) => row.id"
-        :row-props="(row: RecognitionLogOut) => ({
+        :row-key="(row: ActivityGroup) => row.id"
+        :row-props="(row: ActivityGroup) => ({
           style: 'cursor: pointer',
           onClick: () => openDetail(row),
         })"
         @scroll="onTableScroll"
       />
     </div>
-    <LogDetailModal v-model:show="showDetail" :log="selectedLog" />
+    <LogDetailModal v-model:show="showDetail" :logs="selectedLogs" />
   </div>
 </template>
 

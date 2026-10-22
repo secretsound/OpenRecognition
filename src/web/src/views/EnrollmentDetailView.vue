@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NButton,
@@ -12,13 +12,12 @@ import {
 import type { DropdownOption } from "naive-ui";
 import type { UploadFileInfo } from "naive-ui";
 import { api, apiForm, ApiError } from "@/api/client";
-import type { EnrollmentOut, QualityInfo, RecognitionLogListOut, RecognitionLogOut } from "@/types/api";
+import type { EnrollmentOut, QualityInfo } from "@/types/api";
 import PageHeader from "@/components/kit/PageHeader.vue";
 import SegmentedControl from "@/components/kit/SegmentedControl.vue";
 import ProfileMark from "@/components/kit/ProfileMark.vue";
 import TimeAgo from "@/components/kit/TimeAgo.vue";
 import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
-import Chip from "@/components/kit/Chip.vue";
 import StatusPill from "@/components/StatusPill.vue";
 import TypeTag from "@/components/TypeTag.vue";
 import QualityBreakdown from "@/components/QualityBreakdown.vue";
@@ -29,10 +28,10 @@ import FaceEnrollmentModal from "@/components/FaceEnrollmentModal.vue";
 import PhotoEnrollmentModal from "@/components/PhotoEnrollmentModal.vue";
 import VideoEnrollmentModal from "@/components/VideoEnrollmentModal.vue";
 import EnrollmentSettingsForm from "@/components/EnrollmentSettingsForm.vue";
+import EnrollmentActivityPanel from "@/components/EnrollmentActivityPanel.vue";
 import TestModalityDialog from "@/components/TestModalityDialog.vue";
 import { resolveTestModalityFor, type TestModality } from "@/utils/testModality";
 import { useBreadcrumbTail } from "@/composables/useBreadcrumbTail";
-import { verdictFromLog } from "@/utils/verdict";
 import { pct } from "@/utils/confidence";
 import { canWrite } from "@/utils/roles";
 import { useAuth } from "@/composables/useAuth";
@@ -44,7 +43,7 @@ const route = useRoute();
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
-const { role } = useAuth();
+const { role, canAddSamples, canManageEnrollment } = useAuth();
 
 const id = computed(() => route.params.id as string);
 const loading = ref(true);
@@ -59,17 +58,19 @@ const showVoiceWizard = ref(false);
 const showFaceWizard = ref(false);
 const showPhotoWizard = ref(false);
 const showVideoWizard = ref(false);
-const activity = ref<RecognitionLogOut[]>([]);
-const activityLoading = ref(false);
 
 const testedKey = computed(() => `or-tested-${id.value}`);
 const tested = ref(false);
 
 useBreadcrumbTail(computed(() => enrollment.value?.label));
 
+const canTeach = computed(() => canAddSamples(enrollment.value?.id));
+const canManage = computed(() => canManageEnrollment(enrollment.value?.id));
+
 const tab = computed<Tab>({
   get() {
     const t = route.query.tab;
+    if (t === "settings" && !canManage.value) return "overview";
     if (t === "samples" || t === "activity" || t === "settings") return t;
     return "overview";
   },
@@ -80,12 +81,15 @@ const tab = computed<Tab>({
 
 const teaching = computed(() => route.query.teach === "1" || route.query.train === "1");
 
-const tabOptions = [
-  { value: "overview" as const, label: "Overview" },
-  { value: "samples" as const, label: "Samples" },
-  { value: "activity" as const, label: "Activity" },
-  { value: "settings" as const, label: "Settings" },
-];
+const tabOptions = computed(() => {
+  const tabs: { value: Tab; label: string }[] = [
+    { value: "overview", label: "Overview" },
+    { value: "samples", label: "Samples" },
+    { value: "activity", label: "Activity" },
+  ];
+  if (canManage.value) tabs.push({ value: "settings", label: "Settings" });
+  return tabs;
+});
 
 async function evaluateQuality(silent = false) {
   if (!enrollment.value) return;
@@ -117,25 +121,6 @@ async function load() {
   }
 }
 
-async function loadActivity() {
-  if (!enrollment.value) return;
-  activityLoading.value = true;
-  try {
-    const res = await api<RecognitionLogListOut>(
-      `/v1/admin/logs?limit=25&offset=0&label=${encodeURIComponent(enrollment.value.label)}`,
-    );
-    activity.value = res.items;
-  } catch {
-    activity.value = [];
-  } finally {
-    activityLoading.value = false;
-  }
-}
-
-watch(tab, (next) => {
-  if (next === "activity") void loadActivity();
-});
-
 useEventStream((event) => {
   const log = event.log;
   if (!log || event.type !== "recognition.log") return;
@@ -145,7 +130,6 @@ useEventStream((event) => {
     log.entity_id === current.id ||
     (!!log.label && log.label.toLowerCase() === current.label.toLowerCase());
   if (!matches) return;
-  activity.value = [log, ...activity.value.filter((row) => row.id !== log.id)].slice(0, 25);
   if (log.event === "recognition.match" && !log.dry_run) {
     enrollment.value = { ...current, last_seen_at: log.created_at };
   }
@@ -200,11 +184,15 @@ function closeTeach() {
 
 const moreOptions = computed<DropdownOption[]>(() => {
   if (!enrollment.value) return [];
-  return [
-    { label: enrollment.value.enabled ? "Turn off" : "Turn on", key: "toggle" },
-    { type: "divider", key: "d" },
-    { label: "Delete", key: "delete" },
-  ];
+  const options: DropdownOption[] = [];
+  if (canManage.value) {
+    options.push({ label: enrollment.value.enabled ? "Turn off" : "Turn on", key: "toggle" });
+  }
+  if (canWrite(role.value)) {
+    if (options.length) options.push({ type: "divider", key: "d" });
+    options.push({ label: "Delete", key: "delete" });
+  }
+  return options;
 });
 
 async function onMore(key: string) {
@@ -268,13 +256,10 @@ async function remove() {
   }
 }
 
-const lastSeen = computed(
-  () => enrollment.value?.last_seen_at ?? activity.value[0]?.created_at ?? null,
-);
+const lastSeen = computed(() => enrollment.value?.last_seen_at ?? null);
 
 onMounted(async () => {
   await load();
-  if (tab.value === "activity") await loadActivity();
   if (route.query.train === "1") {
     router.replace({ query: { ...route.query, train: undefined, tab: "samples", teach: "1" } });
   }
@@ -288,7 +273,7 @@ onMounted(async () => {
     <template v-else-if="enrollment">
       <PageHeader :title="enrollment.label" description="Samples teach this server who or what to recognize.">
         <template #lead>
-          <ProfileMark :label="enrollment.label" :type="enrollment.type" size="lg" />
+          <ProfileMark :label="enrollment.label" :type="enrollment.type" size="xl" />
         </template>
         <template #meta>
           <TypeTag :type="enrollment.type" />
@@ -299,9 +284,9 @@ onMounted(async () => {
           </span>
         </template>
         <template #action>
-          <NButton v-if="canWrite(role)" type="primary" @click="openTeach">Add samples</NButton>
+          <NButton v-if="canTeach" type="primary" @click="openTeach">Add samples</NButton>
           <NButton @click="goRecognize">Recognize</NButton>
-          <NDropdown v-if="canWrite(role)" :options="moreOptions" @select="onMore">
+          <NDropdown v-if="moreOptions.length" :options="moreOptions" @select="onMore">
             <NButton :loading="deleting">More</NButton>
           </NDropdown>
         </template>
@@ -377,20 +362,13 @@ onMounted(async () => {
         <EnrollmentSamplesPanel
           ref="samplesPanelRef"
           :enrollment-id="enrollment.id"
+          :can-manage="canManage"
           @updated="onSamplesUpdated"
         />
       </section>
 
-      <section v-else-if="tab === 'activity'" class="or-stack">
-        <p v-if="activityLoading" class="or-muted">Loading activity…</p>
-        <p v-else-if="!activity.length" class="or-muted">No events for this name yet.</p>
-        <ul v-else class="activity">
-          <li v-for="row in activity" :key="row.id" class="activity__row">
-            <span>{{ verdictFromLog(row).sentence }}</span>
-            <Chip v-if="row.dry_run">Practice</Chip>
-            <TimeAgo :value="row.created_at" />
-          </li>
-        </ul>
+      <section v-else-if="tab === 'activity'">
+        <EnrollmentActivityPanel :enrollment-id="enrollment.id" :label="enrollment.label" />
       </section>
 
       <section v-else>
@@ -494,28 +472,6 @@ onMounted(async () => {
 .about dd {
   margin: 2px 0 0;
   overflow-wrap: anywhere;
-}
-
-.activity {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--or-line);
-  border-radius: var(--or-radius-md);
-  background: var(--or-surface);
-}
-
-.activity__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border-top: 1px solid var(--or-line);
-}
-
-.activity__row:first-child {
-  border-top: 0;
 }
 
 @media (max-width: 1199px) {

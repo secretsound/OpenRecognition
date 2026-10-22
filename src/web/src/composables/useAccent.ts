@@ -6,6 +6,7 @@ import {
   isAccentPresetId,
   type AccentPresetId,
 } from "@/styles/theme";
+import { t } from "@/i18n";
 
 const STORAGE_KEY = "or-accent";
 
@@ -34,7 +35,7 @@ export function useAccent() {
 
   const accentOptions = computed(() =>
     Object.values(accentPresets).map((p) => ({
-      label: p.label,
+      label: t(`accent.${p.id}`),
       value: p.id as AccentPresetId,
       color: p.primary,
     })),

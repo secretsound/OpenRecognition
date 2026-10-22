@@ -97,6 +97,23 @@ const router = createRouter({
           meta: { breadcrumbs: [{ label: "Users" }] },
         },
         {
+          path: "groups",
+          name: "groups",
+          component: () => import("@/views/GroupsView.vue"),
+          meta: { breadcrumbs: [{ label: "Groups" }] },
+        },
+        {
+          path: "groups/:id",
+          name: "group-detail",
+          component: () => import("@/views/GroupDetailView.vue"),
+          meta: {
+            breadcrumbs: [
+              { label: "Groups", to: "/groups" },
+              { label: "Detail" },
+            ],
+          },
+        },
+        {
           path: "keys",
           name: "keys",
           component: () => import("@/views/ApiKeysView.vue"),
@@ -154,7 +171,7 @@ setUnauthorizedHandler(() => {
 router.beforeEach(async (to) => {
   if (to.meta.public) return true;
 
-  const { username, setSession } = useAuth();
+  const { username, setSession, refreshMe } = useAuth();
   const storedUser = sessionStorage.getItem(USER_KEY);
   const storedRole = sessionStorage.getItem(ROLE_KEY);
   if (!username.value && storedUser && storedRole) {
@@ -163,6 +180,9 @@ router.beforeEach(async (to) => {
 
   try {
     await api("/v1/capabilities", { skipAuthRedirect: true });
+    if (username.value || storedUser) {
+      await refreshMe();
+    }
     return true;
   } catch (e) {
     if (!(e instanceof ApiError) || e.status !== 401) {

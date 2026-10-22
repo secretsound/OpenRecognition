@@ -18,6 +18,7 @@ import { AddOutline, TrashOutline, CopyOutline } from "@vicons/ionicons5";
 import { api, loadFailureMessage } from "@/api/client";
 import type { ApiKeyOut, ApiKeyCreated } from "@/types/api";
 import PageHeader from "@/components/kit/PageHeader.vue";
+import { formatAbsolute } from "@/utils/time";
 import DataList from "@/components/kit/DataList.vue";
 import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
@@ -124,7 +125,7 @@ const columns: DataTableColumns<ApiKeyOut> = [
     width: 168,
     render(row) {
       return row.last_used_at
-        ? new Date(row.last_used_at).toLocaleString()
+        ? formatAbsolute(row.last_used_at)
         : h("span", { class: "muted-cell" }, "Never");
     },
   },
@@ -134,7 +135,7 @@ const columns: DataTableColumns<ApiKeyOut> = [
     width: 168,
     sorter: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     render(row) {
-      return new Date(row.created_at).toLocaleString();
+      return formatAbsolute(row.created_at);
     },
   },
   {
@@ -272,7 +273,7 @@ watch(
             <span class="or-list-card__meta">
               <span>
                 Last used
-                {{ item.last_used_at ? new Date(item.last_used_at).toLocaleString() : "never" }}
+                {{ item.last_used_at ? formatAbsolute(item.last_used_at) : "never" }}
               </span>
               <NPopconfirm @positive-click="revoke(item.id)">
                 <template #trigger>

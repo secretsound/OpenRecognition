@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { NButton, NForm, NFormItem, NInput, useMessage } from "naive-ui";
 import type { FormInst, FormRules } from "naive-ui";
@@ -7,6 +7,7 @@ import { useAuth } from "@/composables/useAuth";
 import { api, ApiError } from "@/api/client";
 import { safeAppPath } from "@/utils/safeRedirect";
 import LogoMark from "@/components/LogoMark.vue";
+import { loadUiConfig, t, uiConfig } from "@/i18n";
 
 const USER_KEY = "or-user";
 const ROLE_KEY = "or-role";
@@ -22,35 +23,54 @@ const checking = ref(true);
 const setupRequired = ref(false);
 const model = ref({ username: "admin", password: "", confirm: "" });
 
-const rules: FormRules = {
-  username: [{ required: true, message: "Username is required", trigger: "blur" }],
+const rules = computed<FormRules>(() => ({
+  username: [{ required: true, message: t("login.userRequired"), trigger: "blur" }],
   password: [
-    { required: true, message: "Password is required", trigger: "blur" },
+    { required: true, message: t("login.passRequired"), trigger: "blur" },
     {
       validator: (_rule, value: string) => !setupRequired.value || value.length >= 8,
-      message: "Use at least 8 characters",
+      message: t("login.passShort"),
       trigger: "blur",
     },
   ],
   confirm: [
     {
       validator: (_rule, value: string) => !setupRequired.value || value === model.value.password,
-      message: "Passwords do not match",
+      message: t("login.mismatch"),
       trigger: "blur",
     },
   ],
-};
+}));
 
 const strength = ref("");
 function onPassword(v: string) {
   model.value.password = v;
   if (!setupRequired.value) return;
-  if (v.length < 8) strength.value = "Use at least 8 characters";
-  else if (v.length < 12) strength.value = "Okay — longer is better";
-  else strength.value = "Strong enough for this server";
+  if (v.length < 8) strength.value = t("login.passShort");
+  else if (v.length < 12) strength.value = t("login.better");
+  else strength.value = t("login.strong");
 }
 
+const nextPath = computed(() => safeAppPath(route.query.redirect) ?? "/");
+const ssoHref = computed(
+  () => `/v1/auth/sso/start?next=${encodeURIComponent(nextPath.value)}`,
+);
+const ssoError = computed(() => {
+  const code = route.query.sso_error;
+  if (code === "denied" || code === "failed" || code === "unprovisioned" || code === "invalid") {
+    return t(`login.sso.${code}`);
+  }
+  return "";
+});
+
 onMounted(async () => {
+  if (!uiConfig.value) {
+    try {
+      await loadUiConfig();
+    } catch {
+      /* English fallback */
+    }
+  }
   try {
     const status = await api<{ required: boolean }>("/v1/auth/setup", { skipAuthRedirect: true });
     setupRequired.value = status.required;
@@ -80,10 +100,10 @@ async function onSubmit() {
     setSession(res.username, res.role);
     sessionStorage.setItem(USER_KEY, res.username);
     sessionStorage.setItem(ROLE_KEY, res.role);
-    message.success(`Welcome, ${res.username}`);
-    router.push(safeAppPath(route.query.redirect) ?? "/");
+    message.success(t("login.welcome", { name: res.username }));
+    router.push(nextPath.value);
   } catch (e) {
-    message.error(e instanceof ApiError ? e.message : "Sign in failed");
+    message.error(e instanceof ApiError ? e.message : t("login.failed"));
   } finally {
     loading.value = false;
   }
@@ -97,25 +117,23 @@ async function onSubmit() {
         <LogoMark :size="40" />
         <div>
           <h1 class="or-title">OpenRecognition</h1>
-          <p v-if="setupRequired" class="or-muted">
-            Create the admin account for this server. It is stored in the database on this machine.
-          </p>
-          <p v-else class="or-muted">
-            Enroll people, pets, objects, and sounds, then recognize them from audio, photos, or video.
-          </p>
+          <p v-if="setupRequired" class="or-muted">{{ t("login.setupLead") }}</p>
+          <p v-else class="or-muted">{{ t("login.lead") }}</p>
         </div>
       </div>
-      <p v-if="checking" class="or-muted or-small">Checking this server…</p>
-      <NForm v-else ref="formRef" :model="model" :rules="rules" size="large" @submit.prevent="onSubmit">
-        <NFormItem path="username" label="Username">
-          <NInput v-model:value="model.username" placeholder="Username" autocomplete="username" />
+      <p v-if="checking" class="or-muted or-small">{{ t("login.checking") }}</p>
+      <template v-else>
+      <p v-if="ssoError" class="login-error">{{ ssoError }}</p>
+      <NForm ref="formRef" :model="model" :rules="rules" size="large" @submit.prevent="onSubmit">
+        <NFormItem path="username" :label="t('login.username')">
+          <NInput v-model:value="model.username" :placeholder="t('login.username')" autocomplete="username" />
         </NFormItem>
-        <NFormItem path="password" label="Password">
+        <NFormItem path="password" :label="t('login.password')">
           <NInput
             :value="model.password"
             type="password"
             show-password-on="click"
-            placeholder="Password"
+            :placeholder="t('login.password')"
             :autocomplete="setupRequired ? 'new-password' : 'current-password'"
             @update:value="onPassword"
           />
@@ -123,21 +141,26 @@ async function onSubmit() {
             {{ strength }}
           </p>
         </NFormItem>
-        <NFormItem v-if="setupRequired" path="confirm" label="Confirm password">
+        <NFormItem v-if="setupRequired" path="confirm" :label="t('login.confirm')">
           <NInput
             v-model:value="model.confirm"
             type="password"
             show-password-on="click"
-            placeholder="Confirm password"
+            :placeholder="t('login.confirm')"
             autocomplete="new-password"
           />
         </NFormItem>
         <NButton type="primary" block attr-type="submit" :loading="loading">
-          {{ setupRequired ? "Create account" : "Sign in" }}
+          {{ setupRequired ? t("login.create") : t("login.signIn") }}
         </NButton>
       </NForm>
+      </template>
+      <div v-if="!checking && !setupRequired && uiConfig?.sso_enabled" class="sso-block">
+        <p class="or-muted or-small sso-or">{{ t("login.or") }}</p>
+        <NButton tag="a" :href="ssoHref" block secondary>{{ uiConfig.sso_label }}</NButton>
+      </div>
       <p v-if="!checking && !setupRequired" class="or-muted or-small" style="margin-top: 16px">
-        Use the admin account for this server.
+        {{ t("login.adminHint") }}
       </p>
     </div>
   </div>
@@ -173,5 +196,20 @@ async function onSubmit() {
 .login-brand .or-title {
   font-size: var(--or-text-heading);
   margin-bottom: 6px;
+}
+
+.login-error {
+  margin: 0 0 12px;
+  color: var(--or-danger, #c2410c);
+  font-size: 0.875rem;
+}
+
+.sso-block {
+  margin-top: 14px;
+}
+
+.sso-or {
+  text-align: center;
+  margin: 0 0 10px;
 }
 </style>

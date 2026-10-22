@@ -41,6 +41,7 @@ class WyomingBridge:
         tag_speaker: bool,
         include_confidence: bool = True,
         include_candidates: bool = False,
+        include_sound_events: bool = False,
         zeroconf_enabled: bool = True,
         zeroconf_name: str = "openrecognition",
         advertise_host: str = "",
@@ -54,6 +55,7 @@ class WyomingBridge:
         self.tag_speaker = tag_speaker
         self.include_confidence = include_confidence
         self.include_candidates = include_candidates
+        self.include_sound_events = include_sound_events
         self.zeroconf_enabled = zeroconf_enabled
         self.zeroconf_name = zeroconf_name
         self.advertise_host = advertise_host
@@ -84,6 +86,7 @@ class WyomingBridge:
         tag_speaker: bool | None = None,
         include_confidence: bool | None = None,
         include_candidates: bool | None = None,
+        include_sound_events: bool | None = None,
         zeroconf_enabled: bool | None = None,
         zeroconf_name: str | None = None,
         advertise_host: str | None = None,
@@ -106,6 +109,8 @@ class WyomingBridge:
             self.include_confidence = include_confidence
         if include_candidates is not None:
             self.include_candidates = include_candidates
+        if include_sound_events is not None:
+            self.include_sound_events = include_sound_events
         if zeroconf_enabled is not None:
             self.zeroconf_enabled = zeroconf_enabled
         if zeroconf_name is not None:
@@ -244,6 +249,7 @@ class WyomingBridge:
                     tag_speaker=self.tag_speaker,
                     include_confidence=self.include_confidence,
                     include_candidates=self.include_candidates,
+                    include_sound_events=self.include_sound_events,
                 )
 
             await server.run(handler_factory)

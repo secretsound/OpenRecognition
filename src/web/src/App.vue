@@ -5,19 +5,23 @@ import {
   NMessageProvider,
   NNotificationProvider,
   NDialogProvider,
-  enUS,
-  dateEnUS,
 } from "naive-ui";
 import { useTheme } from "@/composables/useTheme";
 import { useAuth } from "@/composables/useAuth";
 import { api } from "@/api/client";
 import type { AuthMeOut } from "@/types/api";
 import { roleFromScopes } from "@/utils/roles";
+import { loadUiConfig, naiveDateLocale, naiveLocale } from "@/i18n";
 
 const { naiveTheme, overrides } = useTheme();
 const { setSession } = useAuth();
 
 onMounted(async () => {
+  try {
+    await loadUiConfig();
+  } catch {
+    /* login and the shell still work in English */
+  }
   const storedUser = sessionStorage.getItem("or-user");
   const storedRole = sessionStorage.getItem("or-role");
   if (storedUser && storedRole) setSession(storedUser, storedRole);
@@ -39,8 +43,8 @@ onMounted(async () => {
   <NConfigProvider
     :theme="naiveTheme"
     :theme-overrides="overrides"
-    :locale="enUS"
-    :date-locale="dateEnUS"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
     inline-theme-disabled
   >
     <NMessageProvider placement="bottom" :max="3">

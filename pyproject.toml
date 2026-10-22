@@ -27,6 +27,8 @@ dependencies = [
   "aiofiles>=24.1.0",
   "wyoming>=1.10.2",
   "zeroconf>=0.132.0",
+  "cryptography>=42",
+  "signxml>=4.0",
 ]
 
 [project.optional-dependencies]

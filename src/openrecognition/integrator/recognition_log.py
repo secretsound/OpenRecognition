@@ -134,6 +134,7 @@ class RecognitionLogService:
         reason: str | None = None,
         dry_run: bool = False,
         auth: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         """Log a recognition API response (match / unknown with optional entity)."""
         primary = entities[0] if entities else {}
@@ -151,6 +152,7 @@ class RecognitionLogService:
             latency_ms=response_meta.get("latency_ms"),
             dry_run=dry_run,
             auth=auth,
+            details=details,
         )
 
     def has_recognition(self) -> bool:
@@ -168,6 +170,8 @@ class RecognitionLogService:
         event: str | None = None,
         modality: str | None = None,
         label: str | None = None,
+        entity_id: str | None = None,
+        entity_ids: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         limit = max(1, min(limit, 200))
         offset = max(0, offset)
@@ -179,6 +183,20 @@ class RecognitionLogService:
         if modality:
             where.append("modality = ?")
             params.append(modality)
+        if entity_ids is not None:
+            allowed = list(entity_ids)
+            if entity_id:
+                if entity_id not in allowed:
+                    return [], 0
+                allowed = [entity_id]
+            if not allowed:
+                return [], 0
+            placeholders = ",".join("?" * len(allowed))
+            where.append(f"entity_id IN ({placeholders})")
+            params.extend(allowed)
+        elif entity_id:
+            where.append("entity_id = ?")
+            params.append(entity_id)
         if label:
             where.append("label LIKE ?")
             params.append(f"%{label}%")

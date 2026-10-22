@@ -1,139 +1,62 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { NButton, NIcon, NModal, NTag, NTimeline, NTimelineItem } from "naive-ui";
+import { ChevronBackOutline, ChevronForwardOutline } from "@vicons/ionicons5";
+import type { RecognitionLogOut } from "@/types/api";
+import SegmentedControl from "@/components/kit/SegmentedControl.vue";
 import {
-  NModal,
-  NDescriptions,
-  NDescriptionsItem,
-  NTag,
-  NSpace,
-  NButton,
-  NDivider,
-} from "naive-ui";
-import type {
-  RecognitionLogOut,
-  RecognitionLogSpeakerCandidate,
-} from "@/types/api";
-import { formatLogEvent, formatLogMedia } from "@/utils/logEvent";
+  activityBlurb,
+  enrollmentTarget,
+  eventHeading,
+  processEvents,
+  storyMeta,
+  storySteps,
+  storyTitle,
+  technicalRows,
+} from "@/utils/activityStory";
 
 const show = defineModel<boolean>("show", { required: true });
 
 const props = defineProps<{
-  log: RecognitionLogOut | null;
+  logs: RecognitionLogOut[] | null;
 }>();
 
 const router = useRouter();
 
-const title = computed(() => {
-  if (!props.log) return "Event details";
-  const event = formatEvent(props.log.event);
-  const label = props.log.label?.trim();
-  if (!label || label.toLowerCase() === "unknown") return event;
-  return `${event} — ${label}`;
-});
+const entries = computed(() => props.logs ?? []);
+const title = computed(() => storyTitle(entries.value));
+const meta = computed(() => storyMeta(entries.value));
+const steps = computed(() => storySteps(entries.value));
+const practice = computed(() => entries.value.some((log) => log.dry_run));
+const targetId = computed(() => enrollmentTarget(entries.value));
+const tab = ref<"story" | "technical">("story");
+const techIndex = ref(0);
+const tabOptions = [
+  { value: "story" as const, label: "What happened" },
+  { value: "technical" as const, label: "Technical details" },
+];
+const techLog = computed(() => entries.value[techIndex.value] ?? entries.value[0] ?? null);
+const techQuote = computed(() => (techLog.value ? activityBlurb(techLog.value) : ""));
 
-const gateScores = computed(() => props.log?.details?.gate_scores ?? null);
-const speakerCandidates = computed(
-  () => props.log?.details?.speaker_candidates ?? [],
-);
-const timing = computed(() => props.log?.details?.timing_ms ?? null);
-const minConfidence = computed(() => props.log?.details?.min_confidence ?? null);
-const speakerMatchAttempted = computed(
-  () => props.log?.details?.speaker_match_attempted === true,
-);
-const galleryCount = computed(() => props.log?.details?.gallery_count ?? null);
-const comparableSpeakerCount = computed(
-  () => props.log?.details?.comparable_speaker_count ?? null,
-);
-const speakerMatchSkipped = computed(
-  () =>
-    props.log?.modality === "audio" &&
-    props.log?.gate === "reject" &&
-    !speakerMatchAttempted.value &&
-    speakerCandidates.value.length === 0,
-);
-const showSpeakerSection = computed(
-  () => speakerMatchAttempted.value || speakerCandidates.value.length > 0,
+watch(
+  () => entries.value.map((log) => log.id).join("|"),
+  () => {
+    tab.value = "story";
+    techIndex.value = 0;
+  },
 );
 
-function speakerMatchEmptyMessage(log: RecognitionLogOut) {
-  const model = log.details?.speaker_model_version;
-  if (log.reason === "empty_gallery" || galleryCount.value === 0) {
-    return model
-      ? `No enrollments with voice samples for model ${model}. Add audio samples to a person enrollment.`
-      : "No enrollments with trained audio embeddings in the gallery.";
-  }
-  if (comparableSpeakerCount.value === 0) {
-    return model
-      ? `Enrollments exist but none have voice samples for model ${model}. Face-only enrollments won't match — add voice samples or re-enroll audio.`
-      : "Enrollments exist but none are comparable for speaker ID (need person/sound enrollments with matching audio model dimensions).";
-  }
-  if (log.reason === "no_entities" || log.reason === "unknown_or_low_confidence") {
-    return "Speaker ID ran but no enrollment met the confidence threshold.";
-  }
-  if (log.gate === "reject") {
-    return "Speaker ID ran for logging; the gate rejected this clip before STT.";
-  }
-  return "No enrollment candidates ranked for this clip.";
-}
-
-function formatEvent(event: string) {
-  return formatLogEvent(event);
-}
-
-function eventTagType(event: string) {
-  if (event === "recognition.match") return "success";
-  if (event === "recognition.unknown") return "warning";
-  if (event.startsWith("enrollment.")) return "info";
-  if (event === "recognition.gate_reject") return "error";
-  if (event === "wyoming.transcript") return "success";
-  if (event === "wyoming.blocked") return "warning";
-  return "default";
-}
-
-function pct(value: number | null | undefined) {
-  if (value == null || Number.isNaN(value)) return "—";
-  return `${Math.round(value * 100)}% (${value.toFixed(3)})`;
-}
-
-function formatConfidence(log: RecognitionLogOut) {
-  if (log.event.startsWith("enrollment.")) return "Not applicable";
-  if (log.confidence != null) return pct(log.confidence);
-  const top = log.details?.speaker_candidates?.[0];
-  if (top) return `${top.label}: ${pct(top.confidence)}`;
-  return "—";
-}
-
-function formatGateScore(label: string, value: number | undefined) {
-  if (value == null) return null;
-  return `${label}: ${pct(value)}`;
-}
-
-function candidateStatus(row: RecognitionLogSpeakerCandidate) {
-  if (row.accepted) return "match";
-  if (minConfidence.value != null && row.confidence >= minConfidence.value) return "above threshold";
-  return "below threshold";
-}
-
-function formatActor(log: RecognitionLogOut) {
-  if (!log.actor_name && !log.actor_type) return "—";
-  const kind =
-    log.actor_type === "api_key" ? "API key" : log.actor_type === "user" ? "User" : log.actor_type ?? "";
-  if (log.actor_name && kind) return `${log.actor_name} (${kind})`;
-  return log.actor_name ?? (kind || "—");
-}
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  });
+function stepTech(delta: number) {
+  const next = techIndex.value + delta;
+  if (next < 0 || next >= entries.value.length) return;
+  techIndex.value = next;
 }
 
 function openEnrollment() {
-  if (!props.log?.entity_id) return;
+  if (!targetId.value) return;
   show.value = false;
-  void router.push(`/enrollments/${props.log.entity_id}`);
+  void router.push(`/enrollments/${targetId.value}`);
 }
 </script>
 
@@ -145,196 +68,290 @@ function openEnrollment() {
     class="log-detail-modal or-modal"
     :mask-closable="true"
   >
-    <template v-if="log">
-      <NSpace align="center" :size="8" class="log-detail-tags">
-        <NTag size="small" :bordered="false" :type="eventTagType(log.event)" round>
-          {{ formatEvent(log.event) }}
-        </NTag>
-        <NTag v-if="log.modality" size="small" :bordered="false">{{ formatLogMedia(log.modality) }}</NTag>
-        <NTag v-if="log.dry_run" size="small" :bordered="false" type="default">Practice</NTag>
-        <NTag v-if="log.gate" size="small" :bordered="false" :type="log.gate === 'accept' ? 'success' : 'warning'">
-          {{ log.gate === "accept" ? "Speech check passed" : "Speech check rejected" }}
-        </NTag>
-      </NSpace>
+    <template v-if="entries.length">
+      <div class="log-meta">
+        <span>{{ meta }}</span>
+        <NTag v-if="practice" size="small" :bordered="false" round class="log-meta__tag">Practice</NTag>
+      </div>
 
-      <p v-if="log.summary || log.reason" class="log-summary">
-        {{ log.summary ?? log.reason }}
-      </p>
-      <p class="log-raw">Event name: {{ log.event }}</p>
+      <SegmentedControl v-model="tab" class="log-tabs" aria-label="Event details" :options="tabOptions" />
 
-      <NDivider v-if="log.summary || log.reason" style="margin: 14px 0" />
-
-      <section v-if="gateScores" class="log-section">
-        <h4 class="log-section__title">Speech check</h4>
-        <NSpace :size="8">
-          <NTag v-if="gateScores.speech != null" size="small" :bordered="false" type="success">
-            {{ formatGateScore("speech", gateScores.speech) }}
-          </NTag>
-          <NTag v-if="gateScores.music != null" size="small" :bordered="false" type="warning">
-            {{ formatGateScore("music", gateScores.music) }}
-          </NTag>
-          <NTag v-if="gateScores.noise != null" size="small" :bordered="false" type="default">
-            {{ formatGateScore("noise", gateScores.noise) }}
-          </NTag>
-        </NSpace>
-      </section>
-
-      <section v-if="speakerMatchSkipped" class="log-section">
-        <h4 class="log-section__title">Speaker matching</h4>
-        <p class="log-section__text">
-          This clip did not sound like speech, so nobody was matched. The scores above describe
-          the sound, not who was speaking.
-        </p>
-      </section>
-
-      <section v-if="showSpeakerSection" class="log-section">
-        <h4 class="log-section__title">
-          Speaker candidates
-          <span v-if="minConfidence != null" class="log-section__hint">
-            (threshold {{ pct(minConfidence) }})
-          </span>
-        </h4>
-        <ul v-if="speakerCandidates.length" class="candidate-list">
-          <li v-for="(row, idx) in speakerCandidates" :key="`${row.label}-${idx}`" class="candidate-row">
-            <span class="candidate-row__label">{{ row.label }}</span>
-            <span class="candidate-row__score">{{ pct(row.confidence) }}</span>
-            <NTag
-              size="small"
-              :bordered="false"
-              :type="row.accepted ? 'success' : 'default'"
-              round
+      <NTimeline v-if="tab === 'story'" class="log-timeline" size="medium">
+        <NTimelineItem
+          v-for="step in steps"
+          :key="step.key"
+          :type="step.type"
+          :title="step.title"
+          :time="step.time"
+        >
+          <ul v-if="step.people?.length" class="log-people">
+            <li
+              v-for="person in step.people"
+              :key="person.label"
+              :class="person.passed ? 'is-pass' : 'is-fail'"
             >
-              {{ candidateStatus(row) }}
-            </NTag>
-          </li>
-        </ul>
-        <p v-else class="log-section__text">{{ speakerMatchEmptyMessage(log) }}</p>
-      </section>
+              <span class="log-people__name">{{ person.label }}</span>
+              <span class="log-people__score">
+                {{ person.score }}
+                <template v-if="person.bar"> · bar {{ person.bar }}</template>
+              </span>
+              <span class="log-people__status">{{ person.passed ? "Passed" : "Below" }}</span>
+            </li>
+          </ul>
+          <p
+            v-for="(line, index) in step.lines"
+            :key="`${step.key}-${index}`"
+            :class="step.quote ? 'log-quote' : 'log-line'"
+          >
+            {{ line }}
+          </p>
+        </NTimelineItem>
+      </NTimeline>
 
-      <section v-if="timing" class="log-section">
-        <h4 class="log-section__title">Timing</h4>
-        <p class="log-section__text">
-          identify {{ timing.identify ?? "—" }} ms · upstream {{ timing.upstream ?? "—" }} ms · total
-          {{ timing.total ?? "—" }} ms
-        </p>
-      </section>
+      <div v-else-if="techLog" class="log-tech">
+        <div v-if="entries.length > 1" class="log-pager">
+          <NButton
+            quaternary
+            circle
+            aria-label="Previous command"
+            :disabled="techIndex === 0"
+            @click="stepTech(-1)"
+          >
+            <template #icon>
+              <NIcon><ChevronBackOutline /></NIcon>
+            </template>
+          </NButton>
+          <div class="log-pager__copy">
+            <span class="log-pager__count">{{ techIndex + 1 }} of {{ entries.length }}</span>
+            <span v-if="techQuote && techQuote !== '—'" class="log-pager__quote">{{ techQuote }}</span>
+          </div>
+          <NButton
+            quaternary
+            circle
+            aria-label="Next command"
+            :disabled="techIndex >= entries.length - 1"
+            @click="stepTech(1)"
+          >
+            <template #icon>
+              <NIcon><ChevronForwardOutline /></NIcon>
+            </template>
+          </NButton>
+        </div>
 
-      <NDivider
-        v-if="gateScores || speakerMatchSkipped || showSpeakerSection || timing"
-        style="margin: 14px 0"
-      />
+        <section>
+          <h4 class="log-tech-heading">{{ eventHeading(techLog) }}</h4>
+          <div v-for="event in processEvents(techLog)" :key="event.key" class="log-block">
+            <h5>{{ event.title }}</h5>
+            <p v-for="(line, index) in event.lines" :key="`${event.key}-${index}`">{{ line }}</p>
+          </div>
+          <div class="log-block log-block--quiet">
+            <h5>Record</h5>
+            <dl class="log-tech-list">
+              <div v-for="row in technicalRows(techLog)" :key="`${techLog.id}-${row.label}`">
+                <dt>{{ row.label }}</dt>
+                <dd>{{ row.value }}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+      </div>
 
-      <NDescriptions :column="1" label-placement="left" size="small" class="log-desc">
-        <NDescriptionsItem label="Time">{{ formatTime(log.created_at) }}</NDescriptionsItem>
-        <NDescriptionsItem label="Event">{{ log.event }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.label" label="Label">{{ log.label }}</NDescriptionsItem>
-        <NDescriptionsItem label="Confidence">{{ formatConfidence(log) }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.gate" label="Gate">{{ log.gate }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.reason" label="Reason">{{ log.reason }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.details?.transcript" label="Transcript">
-          {{ log.details.transcript }}
-        </NDescriptionsItem>
-        <NDescriptionsItem v-if="log.details?.block_reason" label="Block reason">
-          {{ log.details.block_reason }}
-        </NDescriptionsItem>
-        <NDescriptionsItem v-if="log.modality" label="Modality">{{ log.modality }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.camera_id" label="Camera">{{ log.camera_id }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.zone" label="Zone">{{ log.zone }}</NDescriptionsItem>
-        <NDescriptionsItem label="Actor">{{ formatActor(log) }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.latency_ms != null" label="Latency">
-          {{ Math.round(log.latency_ms) }} ms
-        </NDescriptionsItem>
-        <NDescriptionsItem label="Sandbox">{{ log.dry_run ? "Yes — webhooks skipped" : "No" }}</NDescriptionsItem>
-        <NDescriptionsItem v-if="log.entity_id" label="Entity ID">
-          <code class="mono">{{ log.entity_id }}</code>
-        </NDescriptionsItem>
-        <NDescriptionsItem v-if="log.request_id" label="Request ID">
-          <code class="mono">{{ log.request_id }}</code>
-        </NDescriptionsItem>
-        <NDescriptionsItem label="Log ID">
-          <code class="mono">{{ log.id }}</code>
-        </NDescriptionsItem>
-      </NDescriptions>
-
-      <NSpace v-if="log.entity_id && log.event.startsWith('enrollment.')" :size="8" style="margin-top: 16px">
+      <div v-if="targetId" class="log-actions">
         <NButton type="primary" secondary @click="openEnrollment">Open enrollment</NButton>
-      </NSpace>
+      </div>
     </template>
   </NModal>
 </template>
 
 <style scoped>
-.log-detail-tags {
-  margin-bottom: 4px;
+.log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  color: var(--n-text-color-3);
+  font-size: 0.8125rem;
+  line-height: 1.4;
 }
 
-.log-summary {
-  margin: 10px 0 0;
-  font-size: 0.9375rem;
-  color: var(--n-text-color-2);
+.log-meta__tag {
+  margin-left: 2px;
+}
+
+.log-tabs {
+  margin-bottom: 16px;
+}
+
+.log-timeline {
+  margin-top: 2px;
+}
+
+.log-line,
+.log-quote {
+  margin: 0;
   line-height: 1.45;
 }
 
-.log-raw {
-  margin: 6px 0 0;
-  font-size: 0.75rem;
-  color: var(--n-text-color-3);
-}
-
-.log-section {
-  margin-top: 12px;
-}
-
-.log-section__title {
-  margin: 0 0 8px;
+.log-line {
+  color: var(--n-text-color-2);
   font-size: 0.875rem;
+}
+
+.log-line + .log-line,
+.log-quote + .log-quote {
+  margin-top: 4px;
+}
+
+.log-quote {
+  font-size: 0.975rem;
+}
+
+.log-people {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  column-gap: 12px;
+  row-gap: 8px;
+  justify-content: start;
+  width: max-content;
+  max-width: 100%;
+}
+
+.log-people li {
+  display: contents;
+}
+
+.log-people__name {
   font-weight: 600;
 }
 
-.log-section__hint {
-  font-weight: 400;
+.log-people__score {
+  color: var(--n-text-color-2);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-people__status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.log-people .is-pass .log-people__status {
+  color: var(--n-success-color, #63e2b7);
+}
+
+.log-people .is-fail .log-people__status {
   color: var(--n-text-color-3);
 }
 
-.log-section__text {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--n-text-color-2);
-}
-
-.candidate-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.log-tech {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.candidate-row {
-  display: flex;
+.log-pager {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
-.candidate-row__label {
-  min-width: 96px;
-  font-weight: 500;
+.log-pager__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
 }
 
-.candidate-row__score {
-  min-width: 120px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.log-pager__count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--n-text-color-3);
+}
+
+.log-pager__quote {
+  max-width: 100%;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-tech-heading {
+  margin: 0 0 4px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.log-block {
+  padding: 12px 0;
+  border-top: 1px solid var(--n-border-color);
+}
+
+.log-block h5 {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--n-text-color-3);
+}
+
+.log-block p {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.log-block p + p {
+  margin-top: 2px;
+}
+
+.log-block--quiet {
+  padding-bottom: 0;
+}
+
+.log-tech-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.log-tech-list div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.log-tech-list dt,
+.log-tech-list dd {
+  margin: 0;
   font-size: 0.8125rem;
+  line-height: 1.45;
 }
 
-.log-desc :deep(.n-descriptions-table-content) {
+.log-tech-list dt {
+  color: var(--n-text-color-3);
+}
+
+.log-tech-list dd {
   word-break: break-word;
 }
 
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.8125rem;
+.log-actions {
+  margin-top: 16px;
 }
 </style>

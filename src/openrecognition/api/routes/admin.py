@@ -1,63 +1,41 @@
 """Admin maintenance and config."""
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
+from fastapi.responses import Response
 
-from openrecognition.api.deps import get_state, require_scope
+from openrecognition.api.deps import get_state, library_limited_ids, require_scope
 from openrecognition.api.errors import bad_request
-from openrecognition.app_state import RESTART_REQUIRED_KEYS, AppState
+from openrecognition.app_state import AppState
+from openrecognition.auth.oidc import OidcError
+from openrecognition.auth.saml import fetch_idp_metadata
+from openrecognition.auth.sso import check_oidc_issuer
+from openrecognition.backup_bundle import build_backup, restore_backup, storage_usage
+from openrecognition.logging_config import apply_runtime_logging
 from openrecognition.models.schemas import (
     AppSettingsOut,
     AppSettingsPatch,
-    HardwareOut,
+    BackupRestoreOut,
+    OidcDiscoverOut,
+    OidcDiscoverRequest,
     RecognitionLogListOut,
     RecognitionLogOut,
+    SamlMetadataOut,
+    SamlMetadataRequest,
+    SelfSignedTlsOut,
+    SelfSignedTlsRequest,
+    ServerLogsOut,
     ServiceRestartOut,
-    SystemInfoOut,
+    StorageUsageOut,
 )
 from openrecognition.service_restart import schedule_restart
-from openrecognition.system_info import collect_system_info
+from openrecognition.site_settings import (
+    apply_settings_patch,
+    server_logs_response,
+    settings_response,
+)
+from openrecognition.tls_material import generate_self_signed
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
-
-
-def _settings_out(state: AppState) -> AppSettingsOut:
-    s = state.settings
-    store = state._runtime_store
-    return AppSettingsOut(
-        maintenance_mode=state.maintenance_mode,
-        enrollment_media_retention=s.enrollment_media_retention,
-        inference_backend=state.inference_policy.backend,
-        inference_status=state.inference_policy.status(),
-        feature_flags=dict(state.feature_flags),
-        default_min_confidence=state.default_min_confidence,
-        default_return_unknown=state.default_return_unknown,
-        default_include_sound_events=state.default_include_sound_events,
-        recognition_log_retention_days=state.recognition_logs.retention_days,
-        hardware=HardwareOut(**state.hardware_info()),
-        auth_required=s.auth_required,
-        docs_enabled=s.docs_enabled,
-        web_enabled=s.web_enabled,
-        data_dir=str(s.data_dir),
-        models_dir=str(s.models_dir),
-        session_ttl_minutes=s.session_ttl_minutes,
-        mqtt_enabled=s.mqtt_enabled,
-        mqtt_host=s.mqtt_host,
-        mqtt_port=s.mqtt_port,
-        mqtt_topic_prefix=s.mqtt_topic_prefix,
-        model_idle_unload_minutes=s.model_idle_unload_minutes,
-        auth_rate_limit_per_minute=s.auth_rate_limit_per_minute,
-        host=s.host,
-        port=s.port,
-        runtime_settings_path=str(store.path) if store else "",
-        restart_required_for=list(RESTART_REQUIRED_KEYS),
-        system=SystemInfoOut(
-            **collect_system_info(
-                host=s.host,
-                port=s.port,
-                web_origin=s.web_origin,
-            ),
-        ),
-    )
 
 
 @router.get("/settings", response_model=AppSettingsOut)
@@ -65,7 +43,7 @@ def get_settings(
     state: AppState = Depends(get_state),
     _auth=Depends(require_scope("admin")),
 ):
-    return _settings_out(state)
+    return settings_response(state)
 
 
 @router.patch("/settings", response_model=AppSettingsOut)
@@ -74,40 +52,96 @@ def patch_settings(
     state: AppState = Depends(get_state),
     _auth=Depends(require_scope("admin")),
 ):
-    if body.inference_backend is not None:
-        state.settings.inference_backend = body.inference_backend
-        state.inference_policy.set_backend(body.inference_backend)
-    if body.maintenance_mode is not None:
-        state.maintenance_mode = body.maintenance_mode
-    if body.enrollment_media_retention is not None:
-        if body.enrollment_media_retention not in ("keep", "embeddings_only"):
-            raise bad_request(
-                "INVALID_RETENTION",
-                "enrollment_media_retention must be 'keep' or 'embeddings_only'",
-            )
-        state.settings.enrollment_media_retention = body.enrollment_media_retention  # type: ignore[assignment]
-    if body.feature_flags is not None:
-        state.feature_flags.update(body.feature_flags)
-    if body.default_min_confidence is not None:
-        state.default_min_confidence = body.default_min_confidence
-    if body.default_return_unknown is not None:
-        state.default_return_unknown = body.default_return_unknown
-    if body.default_include_sound_events is not None:
-        state.default_include_sound_events = body.default_include_sound_events
-    if body.recognition_log_retention_days is not None:
-        state.recognition_logs.set_retention_days(body.recognition_log_retention_days)
-        state.recognition_logs.prune_old()
-    if body.session_ttl_minutes is not None:
-        state.settings.session_ttl_minutes = body.session_ttl_minutes
-        state.sessions.ttl_minutes = body.session_ttl_minutes
-    if body.model_idle_unload_minutes is not None:
-        state.settings.model_idle_unload_minutes = body.model_idle_unload_minutes
-        state.pool.idle_unload_minutes = body.model_idle_unload_minutes
-    if "onnx_intra_op_threads" in body.model_fields_set:
-        state.thread_override = body.onnx_intra_op_threads
-        state.apply_threads()
+    apply_settings_patch(state, body)
     state.persist_runtime()
-    return _settings_out(state)
+    apply_runtime_logging(state.settings)
+    return settings_response(state)
+
+
+@router.get("/storage-usage", response_model=StorageUsageOut)
+def get_storage_usage(
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    return StorageUsageOut(**storage_usage(state))
+
+
+@router.get("/backup")
+def download_backup(
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    payload = build_backup(state)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="openrecognition-backup.zip"'},
+    )
+
+
+@router.post("/backup/restore", response_model=BackupRestoreOut)
+async def upload_backup(
+    file: UploadFile = File(...),
+    confirm: str = Form(...),
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    if confirm != "restore":
+        raise bad_request("INVALID_BACKUP", "Confirm the restore before replacing this server")
+    payload = await file.read()
+    try:
+        restore_backup(state, payload)
+    except ValueError as exc:
+        raise bad_request("INVALID_BACKUP", str(exc)) from exc
+    return BackupRestoreOut(message="Backup restored. Restart the server to finish applying it.")
+
+
+@router.get("/server-logs", response_model=ServerLogsOut)
+def server_logs(
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+    lines: int = Query(200, ge=1, le=1000),
+):
+    return server_logs_response(state, lines)
+
+
+@router.post("/tls/self-signed", response_model=SelfSignedTlsOut)
+def create_self_signed(
+    body: SelfSignedTlsRequest,
+    _state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    try:
+        created = generate_self_signed(body.hostname)
+    except ValueError as exc:
+        raise bad_request("INVALID_SETTINGS", str(exc)) from exc
+    return SelfSignedTlsOut(**created)
+
+
+@router.post("/sso/oidc/discover", response_model=OidcDiscoverOut)
+def discover_oidc(
+    body: OidcDiscoverRequest,
+    _state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    try:
+        found = check_oidc_issuer(body.issuer)
+    except (OidcError, ValueError) as exc:
+        raise bad_request("OIDC_DISCOVERY_FAILED", "Could not read the OpenID configuration") from exc
+    return OidcDiscoverOut(**found)
+
+
+@router.post("/sso/saml/metadata", response_model=SamlMetadataOut)
+def load_saml_metadata(
+    body: SamlMetadataRequest,
+    _state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    try:
+        parsed = fetch_idp_metadata(body.url)
+    except ValueError as exc:
+        raise bad_request("SAML_METADATA_FAILED", str(exc)) from exc
+    return SamlMetadataOut(**parsed)
 
 
 @router.post("/restart", response_model=ServiceRestartOut, status_code=202)
@@ -169,19 +203,23 @@ def patch_flags(
 @router.get("/logs", response_model=RecognitionLogListOut)
 def list_recognition_logs(
     state: AppState = Depends(get_state),
-    _auth=Depends(require_scope("read")),
+    auth=Depends(require_scope("read")),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     event: str | None = Query(None, description="Filter by event, e.g. recognition.match"),
     modality: str | None = Query(None, description="Filter by modality: audio, image, video"),
     label: str | None = Query(None, description="Substring match on detected label"),
+    entity_id: str | None = Query(None, description="Filter by enrollment id"),
 ):
+    allowed = library_limited_ids(state, auth)
     items, total = state.recognition_logs.list_logs(
         limit=limit,
         offset=offset,
         event=event,
         modality=modality,
         label=label,
+        entity_id=entity_id,
+        entity_ids=list(allowed) if allowed is not None else None,
     )
     return RecognitionLogListOut(
         items=[RecognitionLogOut(**row) for row in items],

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NButton,
@@ -21,8 +21,8 @@ import AudioTestSource from "@/components/AudioTestSource.vue";
 import ImageTestSource from "@/components/ImageTestSource.vue";
 import VideoTestSource from "@/components/VideoTestSource.vue";
 import { createVideoJob, pollJob, recognizeFile } from "@/api/recognize";
-import { apiForm, ApiError } from "@/api/client";
-import type { EnrollmentOut, RecognizeResponse } from "@/types/api";
+import { api, apiForm, ApiError } from "@/api/client";
+import type { AppSettingsOut, EnrollmentOut, RecognizeResponse } from "@/types/api";
 import {
   DEFAULT_VIDEO_LIMITS,
   videoModalitiesParam,
@@ -49,7 +49,10 @@ const showOptions = ref(false);
 const showDetails = ref(false);
 
 const audioMode = ref("full");
+const customMinConfidence = ref(false);
 const minConfidence = ref(0.75);
+const serverDefaultConfidence = ref(0.75);
+const enrollmentThreshold = ref<number | null>(null);
 const dryRun = ref(true);
 
 const expectedLabel = computed(() => {
@@ -103,9 +106,49 @@ if (initialModality === "audio" || initialModality === "image" || initialModalit
   modality.value = initialModality;
 }
 
-const verdict = computed(() =>
-  result.value ? verdictFromRecognize(result.value, { minConfidence: minConfidence.value }) : null,
+const requestMinConfidence = computed(() =>
+  customMinConfidence.value ? minConfidence.value : undefined,
 );
+
+const thresholdHint = computed(() => {
+  if (customMinConfidence.value) {
+    return "This run uses the slider below instead of the usual match settings.";
+  }
+  const serverPct = Math.round(serverDefaultConfidence.value * 100);
+  if (enrollmentThreshold.value != null) {
+    return `This run uses this name's ${Math.round(enrollmentThreshold.value * 100)}% bar when it is higher than the ${serverPct}% server default.`;
+  }
+  return `This run uses each name's match setting, or the server default (${serverPct}%).`;
+});
+
+const verdict = computed(() =>
+  result.value
+    ? verdictFromRecognize(result.value, { minConfidence: requestMinConfidence.value })
+    : null,
+);
+
+async function loadThresholdContext() {
+  try {
+    const settings = await api<AppSettingsOut>("/v1/admin/settings");
+    serverDefaultConfidence.value = settings.default_min_confidence;
+    if (!customMinConfidence.value) {
+      minConfidence.value = settings.default_min_confidence;
+    }
+  } catch {
+    /* Keep the built-in 75% fallback if settings are unavailable. */
+  }
+  const id = enrollmentIdFromQuery.value;
+  if (!id) {
+    enrollmentThreshold.value = null;
+    return;
+  }
+  try {
+    const enrollment = await api<EnrollmentOut>(`/v1/enrollments/${id}`);
+    enrollmentThreshold.value = enrollment.threshold;
+  } catch {
+    enrollmentThreshold.value = null;
+  }
+}
 
 const lastCurl = ref("");
 
@@ -141,10 +184,12 @@ async function runTest(opts?: { silent?: boolean }) {
   try {
     const params: Record<string, string | number | boolean> = {
       dry_run: dryRun.value,
-      min_confidence: minConfidence.value,
       return_unknown: true,
       include_candidates: true,
     };
+    if (requestMinConfidence.value != null) {
+      params.min_confidence = requestMinConfidence.value;
+    }
     let path = "/v1/recognize/image";
     if (modality.value === "audio") {
       path = "/v1/recognize/audio";
@@ -228,6 +273,14 @@ const candidates = computed(() => {
   const list = result.value?.diagnostics?.candidates ?? [];
   return [...list].sort((a, b) => b.confidence - a.confidence);
 });
+
+watch(enrollmentIdFromQuery, () => {
+  void loadThresholdContext();
+});
+
+onMounted(() => {
+  void loadThresholdContext();
+});
 </script>
 
 <template>
@@ -274,7 +327,14 @@ const candidates = computed(() => {
             <NFormItem v-if="modality === 'audio'" label="Audio mode">
               <NSelect v-model:value="audioMode" :options="audioModeOptions" />
             </NFormItem>
-            <NFormItem :label="`Minimum confidence (${Math.round(minConfidence * 100)}%)`">
+            <NFormItem label="Custom minimum confidence">
+              <NSwitch v-model:value="customMinConfidence" />
+            </NFormItem>
+            <p class="or-muted or-small">{{ thresholdHint }}</p>
+            <NFormItem
+              v-if="customMinConfidence"
+              :label="`Minimum confidence (${Math.round(minConfidence * 100)}%)`"
+            >
               <NSlider v-model:value="minConfidence" :min="0.3" :max="0.99" :step="0.01" />
             </NFormItem>
             <NFormItem label="Practice run">
@@ -344,7 +404,7 @@ const candidates = computed(() => {
                 </Chip>
                 <ConfidenceMeter
                   :value="row.confidence"
-                  :threshold="row.threshold_used ?? minConfidence"
+                  :threshold="row.threshold_used ?? requestMinConfidence"
                   size="sm"
                 />
               </li>
