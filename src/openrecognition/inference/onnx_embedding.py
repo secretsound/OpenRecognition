@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 
 from openrecognition.inference.audio_gate import resample
-from openrecognition.inference.onnx_helpers import embedding_from_outputs, run_session
+from openrecognition.inference.onnx_helpers import embedding_from_outputs, l2_normalize, run_session
 
 
 def embed_audio_waveform(
@@ -56,6 +56,15 @@ def _image_tensor(
     return np.transpose(tensor, (2, 0, 1))[np.newaxis, ...].astype(np.float32)
 
 
+def _image_input_name(session: Any) -> str:
+    preferred = ("input", "data", "image", "input.1", "pixel_values")
+    names = [inp.name for inp in session.get_inputs()]
+    for name in preferred:
+        if name in names:
+            return name
+    return names[0]
+
+
 def embed_image_nchw(
     session: Any,
     pixels: np.ndarray,
@@ -66,12 +75,36 @@ def embed_image_nchw(
 ) -> np.ndarray:
     """Run a face/re-ID model expecting NCHW float input."""
     tensor = _image_tensor(pixels, size=size, input_norm=input_norm)
-    feeds: dict[str, np.ndarray] = {}
-    for inp in session.get_inputs():
-        if inp.name in ("input", "data", "image", "input.1"):
-            feeds[inp.name] = tensor
-    outputs = run_session(session, feeds)
+    outputs = run_session(session, {_image_input_name(session): tensor})
     return embedding_from_outputs(outputs, embed_dim=embed_dim)
+
+
+def embed_image_cls(
+    session: Any,
+    pixels: np.ndarray,
+    *,
+    size: int = 224,
+    embed_dim: int | None = None,
+    input_norm: str = "imagenet",
+) -> np.ndarray:
+    """Vision transformer: L2-normalize the class token, not the whole sequence."""
+    tensor = _image_tensor(pixels, size=size, input_norm=input_norm)
+    outputs = run_session(session, {_image_input_name(session): tensor})
+    arrays = [out for out in outputs if isinstance(out, np.ndarray)]
+    vec = None
+    for arr in arrays:
+        if arr.ndim == 3 and arr.shape[-1] > 8:
+            vec = arr[0, 0]
+            break
+    if vec is None:
+        return embedding_from_outputs(outputs, embed_dim=embed_dim)
+    flat = vec.astype(np.float32).reshape(-1)
+    if embed_dim is not None and flat.size != embed_dim:
+        if flat.size > embed_dim:
+            flat = flat[:embed_dim]
+        else:
+            flat = np.pad(flat, (0, embed_dim - flat.size))
+    return l2_normalize(flat)
 
 
 def embed_image_classifier(
@@ -84,9 +117,5 @@ def embed_image_classifier(
 ) -> np.ndarray:
     """ImageNet-style classifier ONNX → L2-normalized embedding (logits or penultimate)."""
     tensor = _image_tensor(pixels, size=size, input_norm=input_norm)
-    feeds: dict[str, np.ndarray] = {}
-    for inp in session.get_inputs():
-        if inp.name in ("input", "data", "image", "input.1"):
-            feeds[inp.name] = tensor
-    outputs = run_session(session, feeds)
+    outputs = run_session(session, {_image_input_name(session): tensor})
     return embedding_from_outputs(outputs, embed_dim=embed_dim)

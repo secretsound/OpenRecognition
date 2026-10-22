@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from openrecognition.hardware import detect_hardware
+
 from openrecognition.gallery.db import Database
 from openrecognition.gallery.model_registry import (
     enrollment_count,
@@ -24,10 +26,58 @@ def test_suggestion_follows_the_machine(tmp_path):
     assert suggested_key(records, "voice_match", "pi") == "speaker_campplus"
     assert suggested_key(records, "voice_match", "mini") == "speaker_embedding"
     assert suggested_key(records, "voice_match", "desktop") == "speaker_resnet293"
-    assert suggested_key(records, "match_face", "pi") == "face_embedding"
-    assert suggested_key(records, "match_face", "desktop") == "face_w600k_r50"
+    assert suggested_key(records, "voice_match", "server") == "speaker_eres2netv2"
+    assert suggested_key(records, "match_face", "pi") == "face_edgeface_xs"
+    assert suggested_key(records, "match_face", "mini") == "face_adaface_ir50"
+    assert suggested_key(records, "match_face", "desktop") == "face_auraface"
+    assert suggested_key(records, "match_face", "server") == "face_adaface_ir101"
+    assert suggested_key(records, "find_face", "pi") == "face_yunet"
+    assert suggested_key(records, "find_face", "desktop") == "face_scrfd_10g"
+    assert suggested_key(records, "find_pet", "server") == "animal_yolo11l"
+    assert suggested_key(records, "match_pet", "pi") == "visual_reid"
+    assert suggested_key(records, "match_pet", "mini") == "visual_dinov2_s"
+    assert suggested_key(records, "speech_check", "pi") == "silero_vad"
+    assert suggested_key(records, "speech_check", "mini") == "silero_vad_v6"
     assert fit_for("pi", "desktop") == "lighter"
     assert fit_for("desktop", "pi") == "heavier"
+    assert fit_for("server", "desktop") == "heavier"
+    assert fit_for("desktop", "server") == "lighter"
+
+
+def test_server_tier_follows_memory_and_cores(monkeypatch):
+    monkeypatch.setattr("openrecognition.hardware.platform.machine", lambda: "x86_64")
+
+    monkeypatch.setattr("openrecognition.hardware._memory_mb", lambda: 64 * 1024)
+    monkeypatch.setattr("openrecognition.hardware.os.cpu_count", lambda: 8)
+    assert detect_hardware()["tier"] == "server"
+
+    monkeypatch.setattr("openrecognition.hardware._memory_mb", lambda: 24 * 1024)
+    monkeypatch.setattr("openrecognition.hardware.os.cpu_count", lambda: 16)
+    assert detect_hardware()["tier"] == "server"
+
+    monkeypatch.setattr("openrecognition.hardware._memory_mb", lambda: 20 * 1024)
+    monkeypatch.setattr("openrecognition.hardware.os.cpu_count", lambda: 8)
+    assert detect_hardware()["tier"] == "desktop"
+
+    monkeypatch.setattr("openrecognition.hardware._memory_mb", lambda: 12 * 1024)
+    assert detect_hardware()["tier"] == "mini"
+
+
+def test_yunet_decode_one_cell():
+    from openrecognition.inference.yunet import decode_yunet_level
+
+    boxes = decode_yunet_level(
+        np.array([1.0], dtype=np.float32),
+        np.array([1.0], dtype=np.float32),
+        np.array([[0, 0, np.log(2), np.log(2)]], dtype=np.float32),
+        stride=8,
+        cols=1,
+        conf_thres=0.5,
+    )
+    assert len(boxes) == 1
+    x1, y1, x2, y2, score = boxes[0]
+    assert score == 1.0
+    assert (x1, y1, x2, y2) == (-8.0, -8.0, 8.0, 8.0)
 
 
 def test_knobs_and_onnx_fields_can_be_overridden(tmp_path):

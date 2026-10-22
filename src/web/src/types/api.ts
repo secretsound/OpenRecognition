@@ -409,7 +409,10 @@ export interface ModelCatalogEntry {
   filename: string;
   source: string;
   url: string;
+  page_url?: string;
   description: string;
+  disk_bytes?: number;
+  memory_mb?: number;
   license: string;
   license_warning?: boolean;
   on_disk: boolean;
@@ -423,7 +426,7 @@ export interface ModelCatalogEntry {
   knobs?: KnobField[];
   origin?: "builtin" | "custom";
   active?: boolean;
-  hardware?: "pi" | "mini" | "desktop";
+  hardware?: "pi" | "mini" | "desktop" | "server";
   hardware_note?: string;
   fit?: "match" | "lighter" | "heavier";
   suggested?: boolean;

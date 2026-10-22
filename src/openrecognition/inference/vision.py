@@ -139,9 +139,18 @@ class VisionEngine:
         det_session = self.policy.get_session("face_detector")
         if det_session is None:
             return []
+        cfg = self.pool.onnx_config("face_detector")
+        if str(cfg.get("backend", "scrfd")) == "yunet":
+            from openrecognition.inference.yunet import detect_faces_yunet
+
+            return detect_faces_yunet(
+                det_session,
+                pixels,
+                input_size=(int(cfg.get("input_size", 640)), int(cfg.get("input_size", 640))),
+                conf_thres=float(cfg.get("conf_thres", 0.6)),
+            )
         from openrecognition.inference.scrfd import detect_faces_scrfd
 
-        cfg = self.pool.onnx_config("face_detector")
         return detect_faces_scrfd(
             det_session,
             pixels,
@@ -222,6 +231,10 @@ class VisionEngine:
             return embed_image_classifier(
                 session, pixels, size=size, embed_dim=dim, input_norm=norm
             )
+        if backend == "cls":
+            from openrecognition.inference.onnx_embedding import embed_image_cls
+
+            return embed_image_cls(session, pixels, size=size, embed_dim=dim, input_norm=norm)
         from openrecognition.inference.onnx_embedding import embed_image_nchw
 
         return embed_image_nchw(

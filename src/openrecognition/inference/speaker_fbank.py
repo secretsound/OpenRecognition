@@ -67,14 +67,16 @@ def embed_wespeaker_onnx(
     num_mel_bins: int = 80,
     max_seconds: float = 15.0,
     embed_dim: int | None = None,
+    input_name: str | None = None,
 ) -> np.ndarray:
-    """Run a WeSpeaker ONNX model (input ``feats`` [B,T,80], output ``embs``)."""
+    """Run a filterbank speaker model. WeSpeaker uses ``feats``; ERes2Net uses ``x``."""
     audio = resample(audio, sr, 16000)
     audio = _trim_audio(audio, 16000, max_seconds)
     feats = compute_fbank(audio, 16000, num_mel_bins=num_mel_bins)
     if feats.shape[0] < 1:
         raise ValueError("Audio too short for speaker embedding")
     tensor = feats[np.newaxis, ...].astype(np.float32)
-    outputs = run_session(session, {"feats": tensor})
+    name = input_name or session.get_inputs()[0].name
+    outputs = run_session(session, {name: tensor})
     emb = embedding_from_outputs(outputs, embed_dim=embed_dim)
     return l2_normalize(emb)

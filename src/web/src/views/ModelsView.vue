@@ -64,6 +64,11 @@ const savingHardware = ref(false);
 const threadDraft = ref<number | null>(null);
 const savingThreads = ref(false);
 const showSettings = ref(false);
+const showAbout = ref(false);
+const aboutRow = ref<ModelCatalogEntry | null>(null);
+type AboutTab = "overview" | "others";
+const aboutTab = ref<AboutTab>("overview");
+const pickedKey = ref<string | null>(null);
 const settingsRow = ref<ModelCatalogEntry | null>(null);
 const knobDraft = ref<Record<string, number>>({});
 const contractDraft = ref<Record<string, string | number | boolean>>({});
@@ -144,6 +149,7 @@ const hardwareOptions = computed<SelectOption[]>(() => {
     { label: "Raspberry Pi", value: "pi" },
     { label: "Mini PC", value: "mini" },
     { label: "Desktop", value: "desktop" },
+    { label: "Server", value: "server" },
   ];
 });
 
@@ -163,6 +169,7 @@ function machineLabel(tier: string): string {
   if (tier === "pi") return "Raspberry Pi";
   if (tier === "mini") return "Mini PC";
   if (tier === "desktop") return "Desktop";
+  if (tier === "server") return "Server";
   return tier;
 }
 
@@ -180,6 +187,74 @@ function fitLabel(row: ModelCatalogEntry): string | null {
   if (row.fit === "heavier") return "Heavier";
   if (row.fit === "lighter") return "Lighter";
   return null;
+}
+
+function fitText(row: ModelCatalogEntry): string {
+  return row.fit === "heavier" ? "Too heavy" : "Can run";
+}
+
+function diskBytes(row: ModelCatalogEntry): number {
+  if (row.on_disk && row.size_bytes) return row.size_bytes;
+  return row.disk_bytes || 0;
+}
+
+function memoryLabel(row: ModelCatalogEntry): string {
+  const mb = row.memory_mb || 0;
+  if (!mb) return "";
+  return `about ${memoryText(mb)}`;
+}
+
+function categoryMates(row: ModelCatalogEntry): ModelCatalogEntry[] {
+  const order: Record<string, number> = { pi: 0, mini: 1, desktop: 2, server: 3 };
+  return (status.value?.catalog ?? [])
+    .filter((item) => item.category === row.category)
+    .slice()
+    .sort(
+      (a, b) =>
+        (order[a.hardware || "pi"] ?? 0) - (order[b.hardware || "pi"] ?? 0) ||
+        a.sort_order - b.sort_order,
+    );
+}
+
+const otherMates = computed(() => {
+  const row = aboutRow.value;
+  if (!row) return [];
+  return categoryMates(row).filter((mate) => mate.key !== row.key);
+});
+
+const aboutTabs = computed(() => {
+  const others = otherMates.value.length;
+  return [
+    { value: "overview" as const, label: "Overview" },
+    { value: "others" as const, label: others ? `Similar models (${others})` : "Similar models" },
+  ];
+});
+
+const pickedMate = computed(() =>
+  pickedKey.value ? (catalogByKey.value.get(pickedKey.value) ?? null) : null,
+);
+
+const displayRow = computed(() => {
+  if (aboutTab.value === "others" && pickedMate.value) return pickedMate.value;
+  return aboutRow.value;
+});
+
+function modelRowProps(row: ModelCatalogEntry) {
+  return {
+    style: "cursor: pointer",
+    onClick: () => openAbout(row),
+  };
+}
+
+function openAbout(row: ModelCatalogEntry) {
+  aboutRow.value = row;
+  aboutTab.value = "overview";
+  pickedKey.value = null;
+  showAbout.value = true;
+}
+
+function selectMate(row: ModelCatalogEntry) {
+  pickedKey.value = row.key;
 }
 
 function missingDeps(row: ModelCatalogEntry): string[] {
@@ -273,6 +348,14 @@ const recommendedRows = computed(() => {
   return rows;
 });
 
+const suggestedPlan = computed(() => {
+  const rows = recommendedRows.value;
+  return {
+    disk: rows.reduce((sum, row) => sum + (row.disk_bytes || 0), 0),
+    memory: rows.reduce((sum, row) => sum + (row.memory_mb || 0), 0),
+  };
+});
+
 const tableRows = computed(() => filteredRows.value.slice(0, shownCount.value));
 const hasMoreModels = computed(() => shownCount.value < filteredRows.value.length);
 const modelCountLabel = computed(() => {
@@ -285,7 +368,7 @@ const modelCountLabel = computed(() => {
   if (matched !== total) return `${shown} of ${total} ${noun}`;
   return `${shown} ${noun}`;
 });
-const ROW_HEIGHT = 96;
+const ROW_HEIGHT = 112;
 const tableHeight = computed(() => {
   // Shorter than the first page of rows, so the table body scrolls and can load more.
   const visible = Math.min(Math.max(tableRows.value.length, 1), 6);
@@ -331,14 +414,19 @@ const inferenceDirty = computed(
 
 function formatBytes(n: number | null | undefined): string {
   if (n == null || n <= 0) return "";
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n >= 10 * 1024 ? 0 : 1)} KB`;
+  if (n < 1024 * 1024 * 1024) {
+    const mb = n / (1024 * 1024);
+    return `${mb >= 100 ? Math.round(mb) : mb.toFixed(1)} MB`;
+  }
+  const gb = n / (1024 * 1024 * 1024);
+  return `${gb.toFixed(1)} GB`;
 }
 
 function statusText(row: ModelCatalogEntry): string {
-  if (!row.on_disk) return "Not downloaded";
-  const size = formatBytes(row.size_bytes);
-  return size ? `Ready · ${size}` : "Ready";
+  const size = formatBytes(diskBytes(row));
+  if (row.on_disk) return size ? `Ready · ${size}` : "Ready";
+  return size ? `Not downloaded · ${size}` : "Not downloaded";
 }
 
 function keptCount(row: ModelCatalogEntry): number {
@@ -382,6 +470,9 @@ function applyStatus(next: ModelsStatusOut) {
   threadDraft.value = next.threads.value;
   if (settingsRow.value) {
     settingsRow.value = next.catalog.find((row) => row.key === settingsRow.value?.key) ?? null;
+  }
+  if (aboutRow.value) {
+    aboutRow.value = next.catalog.find((row) => row.key === aboutRow.value?.key) ?? aboutRow.value;
   }
 }
 
@@ -839,7 +930,19 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
     sorter: (a, b) => modelTitle(a).localeCompare(modelTitle(b)),
     render(row) {
       return h("div", { class: "model-cell" }, [
-        h("strong", modelTitle(row)),
+        h("div", { class: "name-line" }, [
+          h("strong", modelTitle(row)),
+          h(
+            NTag,
+            {
+              size: "small",
+              round: true,
+              bordered: false,
+              type: row.fit === "heavier" ? "warning" : "success",
+            },
+            () => fitText(row),
+          ),
+        ]),
         h("div", { class: ["usage-state", usageClass(row)] }, usageText(row)),
         h("div", { class: "cell-meta" }, row.use_for),
       ]);
@@ -887,9 +990,14 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "Status",
     key: "on_disk",
-    width: 136,
+    width: 210,
     render(row) {
-      return h("span", { class: row.on_disk ? "is-ready" : "cell-meta" }, statusText(row));
+      return h("div", [
+        h("div", { class: row.on_disk ? "is-ready" : undefined }, statusText(row)),
+        memoryLabel(row)
+          ? h("div", { class: "cell-meta" }, `${memoryLabel(row)} system memory`)
+          : null,
+      ]);
     },
   },
   {
@@ -1010,25 +1118,40 @@ onMounted(() => {
         </div>
         <p class="hint">
           One model for each kind of recognition, picked for this machine. A heavier model stays available under All models.
+          <template v-if="suggestedPlan.disk > 0">
+            Downloading every suggestion uses {{ formatBytes(suggestedPlan.disk) }} of disk.
+            Loaded together, they need {{ memoryText(suggestedPlan.memory) }} of system memory.
+            A heavier model in one category can sit next to a lighter model in another.
+          </template>
         </p>
         <div class="recommend-grid">
           <article
             v-for="row in recommendedRows"
             :key="row.key"
-            class="recommend-card"
+            class="recommend-card is-clickable"
             :class="{ 'is-active': row.active, 'is-kept': !row.active && keptCount(row) > 0 }"
+            @click="openAbout(row)"
           >
             <p class="recommend-kicker">{{ categoryLabel(row.category) }}</p>
             <div class="name-line">
               <strong>{{ modelTitle(row) }}</strong>
               <NTag size="small" round :bordered="false">Suggested</NTag>
+              <NTag
+                size="small"
+                round
+                :bordered="false"
+                :type="row.fit === 'heavier' ? 'warning' : 'success'"
+              >
+                {{ fitText(row) }}
+              </NTag>
             </div>
             <p class="usage-state" :class="usageClass(row)">{{ usageText(row) }}</p>
             <p class="hint">{{ row.use_for }}</p>
-            <p class="meta-label">Version</p>
-            <p class="cell-meta">{{ row.version || "—" }}</p>
-            <p v-if="row.on_disk && formatBytes(row.size_bytes)" class="cell-meta">{{ formatBytes(row.size_bytes) }}</p>
-            <div class="row-actions">
+            <p v-if="formatBytes(diskBytes(row))" class="cell-meta">
+              {{ formatBytes(diskBytes(row)) }} on disk
+              <template v-if="memoryLabel(row)"> · {{ memoryLabel(row) }} system memory</template>
+            </p>
+            <div class="row-actions" @click.stop>
               <NButton v-if="!row.active" size="small" :loading="usingKey === row.key" @click="requestUse(row)">
                 Use
               </NButton>
@@ -1080,11 +1203,22 @@ onMounted(() => {
           <article
             v-for="row in tableRows"
             :key="row.key"
-            class="or-list-card model-card"
+            class="or-list-card model-card is-clickable"
             :class="{ 'is-active': row.active, 'is-kept': !row.active && keptCount(row) > 0 }"
+            @click="openAbout(row)"
           >
             <div class="model-card-copy">
-              <span class="or-list-card__title">{{ modelTitle(row) }}</span>
+              <span class="or-list-card__title name-line">
+                {{ modelTitle(row) }}
+                <NTag
+                  size="small"
+                  round
+                  :bordered="false"
+                  :type="row.fit === 'heavier' ? 'warning' : 'success'"
+                >
+                  {{ fitText(row) }}
+                </NTag>
+              </span>
               <p class="usage-state" :class="usageClass(row)">{{ usageText(row) }}</p>
               <span class="or-list-card__meta">
                 <span>{{ categoryLabel(row.category) }}</span>
@@ -1096,7 +1230,7 @@ onMounted(() => {
               <p class="cell-meta">{{ row.version || "—" }}</p>
               <p>{{ row.use_for }}</p>
             </div>
-            <div class="row-actions">
+            <div class="row-actions" @click.stop>
               <NButton v-if="!row.active" size="small" :loading="usingKey === row.key" @click="requestUse(row)">
                 Use
               </NButton>
@@ -1135,6 +1269,7 @@ onMounted(() => {
             :header-height="44"
             :min-row-height="ROW_HEIGHT"
             :row-class-name="modelRowClass"
+            :row-props="modelRowProps"
             size="medium"
             :row-key="(row: ModelCatalogEntry) => row.key"
           />
@@ -1276,6 +1411,115 @@ onMounted(() => {
         </template>
       </NModal>
 
+      <NModal
+        v-model:show="showAbout"
+        preset="card"
+        class="or-modal about-modal"
+        :style="{ width: 'min(96vw, 1180px)' }"
+      >
+        <template #header>
+          <div v-if="displayRow" class="product-header">
+            <span>{{ modelTitle(displayRow) }}</span>
+            <NTag
+              round
+              :bordered="false"
+              :type="displayRow.fit === 'heavier' ? 'warning' : 'success'"
+            >
+              {{ fitText(displayRow) }}
+            </NTag>
+          </div>
+        </template>
+        <div v-if="aboutRow && displayRow" class="product">
+          <SegmentedControl
+            v-if="otherMates.length"
+            v-model="aboutTab"
+            :options="aboutTabs"
+            aria-label="Model"
+          />
+
+          <div v-if="aboutTab === 'others'" class="about-mates">
+            <button
+              v-for="mate in otherMates"
+              :key="mate.key"
+              type="button"
+              class="about-mate"
+              :class="{ 'is-picked': mate.key === pickedKey }"
+              @click="selectMate(mate)"
+            >
+              <span>
+                <strong>{{ modelTitle(mate) }}</strong>
+                <em>{{ machineLabel(mate.hardware || "") }}</em>
+              </span>
+              <span class="about-mate-flag">
+                <template v-if="mate.suggested">Suggested</template>
+                <template v-else-if="mate.fit === 'heavier'">Too heavy</template>
+                <template v-else-if="mate.on_disk">Ready</template>
+              </span>
+            </button>
+          </div>
+
+          <div v-if="aboutTab === 'overview' || pickedMate" class="product-sheet">
+            <div class="product-copy">
+              <div class="about-kicker">
+                <NTag size="small" round :bordered="false">{{ categoryLabel(displayRow.category) }}</NTag>
+                <NTag v-if="displayRow.suggested" size="small" round :bordered="false">Suggested</NTag>
+                <NTag v-if="displayRow.active" size="small" round :bordered="false" type="success">In use</NTag>
+              </div>
+              <p class="about-body">{{ displayRow.description }}</p>
+              <div class="product-actions">
+                <NButton
+                  v-if="!displayRow.active"
+                  size="small"
+                  :loading="usingKey === displayRow.key"
+                  @click="requestUse(displayRow)"
+                >
+                  Use
+                </NButton>
+                <NButton
+                  type="primary"
+                  size="small"
+                  :loading="downloadingKey === displayRow.key"
+                  @click="downloadOne(displayRow.key, displayRow.on_disk)"
+                >
+                  {{ displayRow.on_disk ? "Re-download" : "Download" }}
+                </NButton>
+                <a
+                  v-if="displayRow.page_url"
+                  class="about-link"
+                  :href="displayRow.page_url"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Learn more
+                </a>
+              </div>
+            </div>
+            <dl class="product-specs">
+              <div>
+                <dt>Disk space</dt>
+                <dd>{{ formatBytes(diskBytes(displayRow)) || "—" }}</dd>
+              </div>
+              <div>
+                <dt>System memory</dt>
+                <dd>{{ memoryLabel(displayRow) || "—" }}</dd>
+              </div>
+              <div>
+                <dt>Aimed at</dt>
+                <dd>{{ machineLabel(displayRow.hardware || "") }}</dd>
+              </div>
+              <div>
+                <dt>License</dt>
+                <dd>{{ displayRow.license || "—" }}</dd>
+              </div>
+              <div class="is-wide">
+                <dt>Version</dt>
+                <dd>{{ displayRow.version || "—" }}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </NModal>
+
       <NModal v-model:show="showSettings" preset="card" title="ONNX settings" class="or-modal">
         <template v-if="settingsRow">
           <p class="hint">{{ modelTitle(settingsRow) }}. These values are applied the next time this model runs.</p>
@@ -1371,6 +1615,161 @@ onMounted(() => {
 
 .recommend-card .row-actions {
   margin-top: auto;
+}
+
+.about-modal {
+  width: min(96vw, 1180px) !important;
+  max-width: 1180px;
+}
+
+.product-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.product-header span {
+  min-width: 0;
+}
+
+.about-modal :deep(.n-card__content) {
+  padding-top: 8px;
+}
+
+.product {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.product-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.product-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.product-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.about-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.about-body {
+  margin: 0;
+  max-width: 68ch;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.product-specs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+}
+
+.product-specs div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 78px;
+  padding: 16px 18px;
+  border: 1px solid var(--or-line, var(--n-border-color));
+  border-radius: var(--or-radius-md, 10px);
+}
+
+.product-specs .is-wide {
+  grid-column: span 2;
+}
+
+.product-specs dt {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--n-text-color-3);
+}
+
+.product-specs dd {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.about-mates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.about-mate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 96px;
+  padding: 12px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--or-line, var(--n-border-color));
+  border-radius: var(--or-radius-md, 10px);
+  cursor: pointer;
+}
+
+.about-mate.is-picked {
+  border-color: var(--or-accent, var(--n-primary-color));
+}
+
+.about-mate em {
+  display: block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--n-text-color-3);
+}
+
+.about-mate-flag {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--n-text-color-3);
+}
+
+.about-link {
+  color: var(--or-accent, var(--n-primary-color));
+  font-weight: 600;
+}
+
+.is-clickable {
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .product-specs,
+  .about-mates {
+    grid-template-columns: 1fr;
+  }
+
+  .product-specs .is-wide {
+    grid-column: auto;
+  }
 }
 
 .usage-state {

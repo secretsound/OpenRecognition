@@ -223,7 +223,7 @@ class AppState:
             self.pool.idle_unload_minutes = s.model_idle_unload_minutes
         if "hardware_tier" in data:
             tier = data["hardware_tier"]
-            self.hardware_override = tier if tier in ("pi", "mini", "desktop") else None
+            self.hardware_override = tier if tier in ("pi", "mini", "desktop", "server") else None
         if "onnx_intra_op_threads" in data:
             raw = data["onnx_intra_op_threads"]
             self.thread_override = int(raw) if raw else None
@@ -238,7 +238,7 @@ class AppState:
         from openrecognition.hardware import detect_hardware, tier_label
 
         detected = detect_hardware()
-        override = self.hardware_override if self.hardware_override in ("pi", "mini", "desktop") else None
+        override = self.hardware_override if self.hardware_override in ("pi", "mini", "desktop", "server") else None
         effective = override or detected["tier"]
         return {
             "detected": detected["tier"],

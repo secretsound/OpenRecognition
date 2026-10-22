@@ -18,6 +18,8 @@ from openrecognition.gallery.db import Database
 from openrecognition.hardware import TIER_RANK
 from openrecognition.model_slots import CATEGORY_SLOT
 from openrecognition.models_download import (
+    guide_for,
+    public_page,
     MODEL_CATALOG,
     MODEL_CATEGORIES,
     ModelDownloadSpec,
@@ -88,7 +90,7 @@ class ModelRecord:
             category=self.category,  # type: ignore[arg-type]
             use_for=self.use_for,
             label=self.label,
-            hardware=self.hardware if self.hardware in ("pi", "mini", "desktop") else "pi",  # type: ignore[arg-type]
+            hardware=self.hardware if self.hardware in TIER_RANK else "pi",  # type: ignore[arg-type]
             hardware_note=self.hardware_note,
             version=self.version,
             onnx=self.effective,
@@ -683,13 +685,17 @@ def build_status(
                     "overridden": overridden,
                 }
             )
+        guide = guide_for(record.key)
         catalog.append(
             {
                 "key": record.key,
                 "filename": record.filename,
                 "source": record.source,
                 "url": record.url,
-                "description": record.description,
+                "page_url": guide.page_url if guide else public_page(record.url),
+                "description": guide.summary if guide else record.description,
+                "disk_bytes": guide.disk_bytes if guide else 0,
+                "memory_mb": guide.memory_mb if guide else 0,
                 "license": record.license,
                 "license_warning": license_needs_confirm(record.license),
                 "on_disk": path is not None,

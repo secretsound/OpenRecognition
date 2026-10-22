@@ -159,9 +159,6 @@ async function onSubmit() {
         <p class="or-muted or-small sso-or">{{ t("login.or") }}</p>
         <NButton tag="a" :href="ssoHref" block secondary>{{ uiConfig.sso_label }}</NButton>
       </div>
-      <p v-if="!checking && !setupRequired" class="or-muted or-small" style="margin-top: 16px">
-        {{ t("login.adminHint") }}
-      </p>
     </div>
   </div>
 </template>

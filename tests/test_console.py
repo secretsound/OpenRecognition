@@ -14,7 +14,7 @@ def test_console_overview_shape(client, auth_headers):
     assert "models_ready" in body
     assert "wyoming_enabled" in body
     assert body["webhook_count"] == 0
-    assert body["hardware"] in ("pi", "mini", "desktop")
+    assert body["hardware"] in ("pi", "mini", "desktop", "server")
     assert "/v1/console/overview" in client.get("/v1/capabilities", headers=auth_headers).json()[
         "endpoints"
     ]

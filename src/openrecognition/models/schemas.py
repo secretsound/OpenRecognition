@@ -838,8 +838,11 @@ class ModelCatalogEntryOut(BaseModel):
     filename: str
     source: str
     url: str
+    page_url: str = ""
     description: str
     license: str
+    disk_bytes: int = 0
+    memory_mb: int = 0
     license_warning: bool = False
     on_disk: bool
     size_bytes: int | None = None
@@ -878,7 +881,7 @@ class ModelsStatusOut(BaseModel):
 
 
 class HardwareUpdate(BaseModel):
-    tier: Literal["pi", "mini", "desktop"] | None = None
+    tier: Literal["pi", "mini", "desktop", "server"] | None = None
 
 
 class ModelSettingsUpdate(BaseModel):

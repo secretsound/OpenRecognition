@@ -5,7 +5,7 @@ def test_admin_models_status(client, auth_headers):
     r = client.get("/v1/admin/models", headers=auth_headers)
     assert r.status_code == 200
     body = r.json()
-    assert body["hardware"]["effective"] in ("pi", "mini", "desktop")
+    assert body["hardware"]["effective"] in ("pi", "mini", "desktop", "server")
     assert body["models_dir"]
     assert len(body["catalog"]) >= 7
     keys = {m["key"] for m in body["catalog"]}
@@ -15,7 +15,9 @@ def test_admin_models_status(client, auth_headers):
     assert len(body["categories"]) >= 3
     assert len(body["presets"]) >= 3
     voice = next(p for p in body["presets"] if p["id"] == "voice")
-    assert "silero_vad" in voice["keys"]
+    by_key = {m["key"]: m for m in body["catalog"]}
+    assert {by_key[key]["category"] for key in voice["keys"]} == {"speech_check", "voice_match"}
+    assert all(by_key[key]["suggested"] for key in voice["keys"])
     assert "complete" in voice
     row = next(m for m in body["catalog"] if m["key"] == "face_embedding")
     assert row["category"] == "match_face"
@@ -68,7 +70,7 @@ def test_hardware_override_changes_the_suggestion(client, auth_headers):
     assert by_key["speaker_campplus"]["suggested"] is True
     assert by_key["speaker_resnet293"]["fit"] == "heavier"
     assert by_key["speaker_resnet293"]["suggested"] is False
-    assert by_key["face_embedding"]["suggested"] is True
+    assert by_key["face_edgeface_xs"]["suggested"] is True
 
     r = client.put(
         "/v1/admin/models/hardware",
@@ -78,7 +80,8 @@ def test_hardware_override_changes_the_suggestion(client, auth_headers):
     body = r.json()
     by_key = {row["key"]: row for row in body["catalog"]}
     assert by_key["speaker_resnet293"]["suggested"] is True
-    assert by_key["face_w600k_r50"]["suggested"] is True
+    assert by_key["face_auraface"]["suggested"] is True
+    assert by_key["speaker_eres2netv2"]["fit"] == "heavier"
     assert by_key["speaker_campplus"]["fit"] == "lighter"
 
     r = client.put(

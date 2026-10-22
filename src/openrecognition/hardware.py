@@ -10,8 +10,9 @@ TIER_LABELS = {
     "pi": "Raspberry Pi",
     "mini": "Mini PC",
     "desktop": "Desktop",
+    "server": "Server",
 }
-TIER_RANK = {"pi": 0, "mini": 1, "desktop": 2}
+TIER_RANK = {"pi": 0, "mini": 1, "desktop": 2, "server": 3}
 
 
 def _memory_mb() -> int:
@@ -61,6 +62,10 @@ def detect_hardware() -> dict:
         tier = "mini"
     elif not memory_mb and cores <= 4:
         tier = "pi"
+    elif memory_mb and memory_mb > 32 * 1024:
+        tier = "server"
+    elif cores >= 16 and memory_mb and memory_mb >= 24 * 1024:
+        tier = "server"
     else:
         tier = "desktop"
     return {

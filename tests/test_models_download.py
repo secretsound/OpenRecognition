@@ -64,6 +64,24 @@ def test_list_catalog_has_the_builtin_set():
     assert "audio_gate_classifier" in keys
 
 
+def test_every_model_has_planning_facts():
+    from openrecognition.models_download import MODEL_GUIDE, public_page
+
+    missing = [spec.key for spec in MODEL_CATALOG if spec.key not in MODEL_GUIDE]
+    assert missing == []
+    for spec in MODEL_CATALOG:
+        guide = MODEL_GUIDE[spec.key]
+        assert guide.page_url.startswith("https://")
+        assert not guide.page_url.lower().endswith(".onnx")
+        assert guide.disk_bytes > 1000
+        assert guide.memory_mb >= 32
+        assert len(guide.summary) > 40
+    assert public_page(
+        "https://huggingface.co/fal/AuraFace-v1/resolve/main/glintr100.onnx"
+    ) == "https://huggingface.co/fal/AuraFace-v1"
+    assert public_page("https://example.com/weights/model.onnx") == ""
+
+
 def test_catalog_for_pack_still_lists_shared_models():
     edge = catalog_for_pack("edge")
     assert len(edge) >= 2
