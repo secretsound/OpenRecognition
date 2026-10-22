@@ -17,6 +17,7 @@ LANGUAGES = frozenset({"en", "es", "fr", "de", "pt", "zh"})
 LOG_LEVELS = frozenset({"debug", "info", "warning", "error"})
 SSO_PROTOCOLS = frozenset({"oidc", "saml"})
 SSO_ROLES = frozenset({"viewer", "operator", "admin"})
+SSO_MATCH = frozenset({"username", "email"})
 
 RESTART_KEYS = (
     "host",
@@ -71,6 +72,7 @@ _STR_KEYS = (
     "sso_protocol",
     "sso_label",
     "sso_default_role",
+    "sso_match",
     "sso_username_claim",
     "oidc_issuer",
     "oidc_client_id",
@@ -185,6 +187,8 @@ def apply_site_snapshot(settings: Settings, data: dict[str, Any]) -> None:
             _assign_choice(settings, key, value, SSO_PROTOCOLS)
         elif key == "sso_default_role":
             _assign_choice(settings, key, value, SSO_ROLES)
+        elif key == "sso_match":
+            _assign_choice(settings, key, value, SSO_MATCH)
         else:
             setattr(settings, key, value)
     if "host" in data:

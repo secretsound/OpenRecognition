@@ -105,6 +105,7 @@ def _scopes_from_body(
 def _user_out(state: AppState, user: dict) -> UserOut:
     return UserOut(
         **{k: user[k] for k in ("id", "username", "role", "created_at")},
+        email=user.get("email"),
         groups=[GroupBriefOut(**g) for g in state.groups.briefs_for_user(user["id"])],
     )
 
@@ -215,7 +216,9 @@ def create_user(
     _auth=Depends(require_scope("admin")),
 ):
     try:
-        user = state.sessions.create_user(body.username, body.password, body.role)
+        user = state.sessions.create_user(
+            body.username, body.password, body.role, email=body.email
+        )
         if body.group_ids is not None:
             state.groups.set_user_groups(user["id"], body.group_ids)
     except ValueError as e:
@@ -232,13 +235,16 @@ def patch_user(
     auth=Depends(get_auth),
     _admin=Depends(require_scope("admin")),
 ):
-    if not body.role and not body.password and body.group_ids is None:
-        raise bad_request("EMPTY_PATCH", "Provide role, password, and/or groups to update")
+    email_set = "email" in body.model_fields_set
+    if not body.role and not body.password and body.group_ids is None and not email_set:
+        raise bad_request("EMPTY_PATCH", "Provide role, password, email, and/or groups to update")
     try:
         user = state.sessions.update_user(
             user_id,
             role=body.role,
             password=body.password,
+            email=body.email,
+            email_set=email_set,
         )
         if user and body.group_ids is not None:
             state.groups.set_user_groups(user_id, body.group_ids)
@@ -283,7 +289,7 @@ def setup_admin(
         raise bad_request("ALREADY_CONFIGURED", "An admin account already exists")
     username = body.username.strip()
     try:
-        user = state.sessions.create_user(username, body.password, "admin")
+        user = state.sessions.create_user(username, body.password, "admin", email=body.email)
     except ValueError as exc:
         raise bad_request("INVALID_ACCOUNT", str(exc)) from exc
     sid = state.sessions.create_session(user["id"])

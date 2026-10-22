@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL,
     created_at TEXT NOT NULL,
     sso_subject TEXT,
-    sso_protocol TEXT
+    sso_protocol TEXT,
+    email TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

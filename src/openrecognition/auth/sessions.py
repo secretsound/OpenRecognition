@@ -1,5 +1,6 @@
 """Web UI session and local user accounts."""
 
+import re
 import secrets
 import sqlite3
 import uuid
@@ -38,6 +39,20 @@ def _is_default_password(password_hash: str) -> bool:
         return bcrypt.checkpw(b"admin", password_hash.encode())
     except ValueError:
         return False
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def normalize_email(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if not text:
+        return None
+    if len(text) > 254 or _EMAIL_RE.fullmatch(text) is None:
+        raise ValueError("Enter a valid email address")
+    return text
 
 
 VALID_ROLES = frozenset({"viewer", "operator", "admin"})
@@ -98,13 +113,13 @@ class SessionService:
 
     def list_users(self) -> list[dict[str, Any]]:
         rows = self.db.fetchall(
-            "SELECT id, username, role, created_at FROM users ORDER BY username"
+            "SELECT id, username, email, role, created_at FROM users ORDER BY username"
         )
         return [dict(r) for r in rows]
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         row = self.db.fetchone(
-            "SELECT id, username, role, created_at FROM users WHERE id = ?",
+            "SELECT id, username, email, role, created_at FROM users WHERE id = ?",
             (user_id,),
         )
         return dict(row) if row else None
@@ -125,6 +140,41 @@ class SessionService:
             return self.groups.effective_role(user_id, base_role)
         return base_role if base_role in VALID_ROLES else "viewer"
 
+    def _find_email(self, email: str | None) -> dict[str, Any] | None:
+        if not email:
+            return None
+        row = self.db.fetchone(
+            "SELECT id, username, email, role, sso_subject FROM users WHERE email = ?",
+            (email,),
+        )
+        return dict(row) if row else None
+
+    def _attach_sso(
+        self,
+        user: dict[str, Any],
+        *,
+        subject: str,
+        protocol: str,
+        email: str | None,
+    ) -> None:
+        existing_subject = user.get("sso_subject")
+        if existing_subject and existing_subject != subject:
+            raise ValueError("Account is linked to a different identity")
+        if email:
+            owner = self._find_email(email)
+            if owner is not None and owner["id"] != user["id"]:
+                raise ValueError("Email is linked to a different identity")
+        sets = ["sso_subject = ?", "sso_protocol = ?"]
+        params: list[Any] = [subject, protocol]
+        if email and not user.get("email"):
+            sets.append("email = ?")
+            params.append(email)
+        params.append(user["id"])
+        self.db.execute(
+            f"UPDATE users SET {', '.join(sets)} WHERE id = ?",
+            tuple(params),
+        )
+
     def provision_sso_user(
         self,
         *,
@@ -134,39 +184,45 @@ class SessionService:
         role: str,
         link_existing: bool,
         auto_provision: bool,
+        email: str | None = None,
+        match: str = "username",
     ) -> dict[str, Any]:
         if role not in VALID_ROLES:
             role = "viewer"
         if not subject:
             raise ValueError("Missing identity")
+        cleaned_email = normalize_email(email)
         linked = self.db.fetchone(
-            "SELECT id, username, role FROM users WHERE sso_subject = ?",
+            "SELECT id, username, email, role, sso_subject FROM users WHERE sso_subject = ?",
             (subject,),
         )
-        if linked is None and link_existing:
-            by_name = self.db.fetchone(
-                "SELECT id, username, role, sso_subject FROM users WHERE username = ?",
-                (username,),
-            )
-            if by_name is not None:
-                existing_subject = by_name["sso_subject"]
-                if existing_subject and existing_subject != subject:
-                    raise ValueError("Username is linked to a different identity")
-                self.db.execute(
-                    "UPDATE users SET sso_subject = ?, sso_protocol = ? WHERE id = ?",
-                    (subject, protocol, by_name["id"]),
+        if linked is not None:
+            linked = dict(linked)
+            self._attach_sso(linked, subject=subject, protocol=protocol, email=cleaned_email)
+        elif link_existing:
+            if match == "email":
+                chosen = self._find_email(cleaned_email)
+            else:
+                by_name = self.db.fetchone(
+                    "SELECT id, username, email, role, sso_subject FROM users WHERE username = ?",
+                    (username,),
                 )
-                linked = by_name
+                chosen = dict(by_name) if by_name is not None else None
+            if chosen is not None:
+                self._attach_sso(chosen, subject=subject, protocol=protocol, email=cleaned_email)
+                linked = chosen
         if linked is None:
             if not auto_provision:
                 raise ValueError("No account on this server matches that identity")
+            if cleaned_email and self._find_email(cleaned_email):
+                raise ValueError("Email is linked to a different identity")
             uid = str(uuid.uuid4())
             created_at = _now_iso()
             try:
                 self.db.execute(
                     """INSERT INTO users
-                       (id, username, password_hash, role, created_at, sso_subject, sso_protocol)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                       (id, username, password_hash, role, created_at, sso_subject, sso_protocol, email)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         uid,
                         username,
@@ -175,27 +231,55 @@ class SessionService:
                         created_at,
                         subject,
                         protocol,
+                        cleaned_email,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError("Username is linked to a different identity") from exc
-            return {"id": uid, "username": username, "role": role, "created_at": created_at}
-        return {"id": linked["id"], "username": linked["username"], "role": linked["role"]}
+            return {
+                "id": uid,
+                "username": username,
+                "email": cleaned_email,
+                "role": role,
+                "created_at": created_at,
+            }
+        return {
+            "id": linked["id"],
+            "username": linked["username"],
+            "email": cleaned_email or linked.get("email"),
+            "role": linked["role"],
+        }
 
-    def create_user(self, username: str, password: str, role: str) -> dict[str, Any]:
+    def create_user(
+        self,
+        username: str,
+        password: str,
+        role: str,
+        email: str | None = None,
+    ) -> dict[str, Any]:
         if role not in VALID_ROLES:
             raise ValueError(f"Invalid role: {role}")
+        cleaned_email = normalize_email(email)
         existing = self.db.fetchone("SELECT id FROM users WHERE username = ?", (username,))
         if existing:
             raise ValueError("Username already exists")
+        if cleaned_email and self._find_email(cleaned_email):
+            raise ValueError("Email already exists")
         uid = str(uuid.uuid4())
         pw_hash = _hash_password(password)
         created_at = _now_iso()
         self.db.execute(
-            "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
-            (uid, username, pw_hash, role, created_at),
+            """INSERT INTO users (id, username, password_hash, role, created_at, email)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (uid, username, pw_hash, role, created_at, cleaned_email),
         )
-        return {"id": uid, "username": username, "role": role, "created_at": created_at}
+        return {
+            "id": uid,
+            "username": username,
+            "email": cleaned_email,
+            "role": role,
+            "created_at": created_at,
+        }
 
     def update_user(
         self,
@@ -203,6 +287,8 @@ class SessionService:
         *,
         role: str | None = None,
         password: str | None = None,
+        email: str | None = None,
+        email_set: bool = False,
     ) -> dict[str, Any] | None:
         user = self.get_user(user_id)
         if not user:
@@ -225,6 +311,12 @@ class SessionService:
                 "UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, user_id)
             )
             self.delete_sessions_for_user(user_id)
+        if email_set:
+            cleaned_email = normalize_email(email)
+            owner = self._find_email(cleaned_email)
+            if owner is not None and owner["id"] != user_id:
+                raise ValueError("Email already exists")
+            self.db.execute("UPDATE users SET email = ? WHERE id = ?", (cleaned_email, user_id))
         return self.get_user(user_id)
 
     def delete_user(self, user_id: str, *, actor_user_id: str | None = None) -> bool:
@@ -243,7 +335,10 @@ class SessionService:
         self.db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
 
     def authenticate_user(self, username: str, password: str) -> dict[str, Any] | None:
-        row = self.db.fetchone("SELECT * FROM users WHERE username = ?", (username,))
+        ident = username.strip()
+        row = self.db.fetchone("SELECT * FROM users WHERE username = ?", (ident,))
+        if row is None and "@" in ident:
+            row = self.db.fetchone("SELECT * FROM users WHERE email = ?", (ident.lower(),))
         if not row:
             return None
         try:

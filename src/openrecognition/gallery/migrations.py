@@ -238,12 +238,14 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     for name, ddl in (
         ("sso_subject", "TEXT"),
         ("sso_protocol", "TEXT"),
+        ("email", "TEXT"),
     ):
         if name not in user_cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_sso_subject ON users(sso_subject)"
     )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS sso_login_states (
             id TEXT PRIMARY KEY,

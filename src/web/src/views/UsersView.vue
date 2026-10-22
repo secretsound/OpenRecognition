@@ -41,12 +41,14 @@ const editFormRef = ref<FormInst | null>(null);
 const editingUser = ref<UserOut | null>(null);
 const createForm = ref({
   username: "",
+  email: "",
   password: "",
   role: "operator",
   groupIds: [] as string[],
 });
 
 const editForm = ref({
+  email: "",
   role: "operator",
   password: "",
   groupIds: [] as string[],
@@ -90,6 +92,15 @@ const columns: DataTableColumns<UserOut> = [
             )
           : null,
       ]);
+    },
+  },
+  {
+    title: "Email",
+    key: "email",
+    minWidth: 180,
+    ellipsis: { tooltip: true },
+    render(row) {
+      return row.email || "—";
     },
   },
   {
@@ -195,6 +206,7 @@ async function create() {
       method: "POST",
       json: {
         username: createForm.value.username.trim(),
+        email: createForm.value.email.trim() || null,
         password: createForm.value.password,
         role: createForm.value.role,
         group_ids: createForm.value.groupIds,
@@ -202,7 +214,7 @@ async function create() {
     });
     message.success("User created");
     showCreate.value = false;
-    createForm.value = { username: "", password: "", role: "operator", groupIds: [] };
+    createForm.value = { username: "", email: "", password: "", role: "operator", groupIds: [] };
     await load();
   } catch (e) {
     message.error(e instanceof ApiError ? e.message : "Failed to create user");
@@ -218,6 +230,7 @@ function sameGroups(a: string[], b: string[]) {
 function openEdit(user: UserOut) {
   editingUser.value = user;
   editForm.value = {
+    email: user.email ?? "",
     role: user.role,
     password: "",
     groupIds: (user.groups ?? []).map((g) => g.id),
@@ -231,18 +244,28 @@ async function saveEdit() {
     editForm.value.groupIds,
     (editingUser.value.groups ?? []).map((g) => g.id),
   );
-  if (!editForm.value.password && editForm.value.role === editingUser.value.role && !groupsChanged) {
-    message.warning("Change role, groups, or set a new password");
+  const emailChanged =
+    editForm.value.email.trim().toLowerCase() !== (editingUser.value.email ?? "").toLowerCase();
+  if (
+    !editForm.value.password &&
+    editForm.value.role === editingUser.value.role &&
+    !groupsChanged &&
+    !emailChanged
+  ) {
+    message.warning("Change role, groups, email, or set a new password");
     return;
   }
   saving.value = true;
   try {
-    const patch: { role?: string; password?: string; group_ids?: string[] } = {};
+    const patch: { role?: string; password?: string; email?: string | null; group_ids?: string[] } = {};
     if (editForm.value.role !== editingUser.value.role) {
       patch.role = editForm.value.role;
     }
     if (editForm.value.password) {
       patch.password = editForm.value.password;
+    }
+    if (emailChanged) {
+      patch.email = editForm.value.email.trim() || null;
     }
     if (groupsChanged) {
       patch.group_ids = editForm.value.groupIds;
@@ -327,6 +350,7 @@ onMounted(load);
               <NTag v-if="item.username === currentUsername" size="small" round :bordered="false">you</NTag>
             </span>
             <span class="or-list-card__meta">
+              <span v-if="item.email" class="or-muted">{{ item.email }}</span>
               <NTag size="small" round :bordered="false" :type="roleTagType(item.role)">{{ item.role }}</NTag>
               <span v-if="item.groups?.length" class="or-muted">{{ item.groups.map((g) => g.name).join(", ") }}</span>
               <NButton size="small" quaternary :aria-label="`Edit ${item.username}`" @click="openEdit(item)">
@@ -349,6 +373,13 @@ onMounted(load);
           :rule="{ required: true, message: 'Username is required' }"
         >
           <NInput v-model:value="createForm.username" placeholder="jane" autocomplete="off" />
+        </NFormItem>
+        <NFormItem label="Email">
+          <NInput
+            v-model:value="createForm.email"
+            placeholder="jane@example.com"
+            autocomplete="off"
+          />
         </NFormItem>
         <NFormItem
           label="Password"
@@ -391,6 +422,13 @@ onMounted(load);
       class="or-modal or-modal--narrow"
     >
       <NForm ref="editFormRef" :model="editForm" label-placement="top">
+        <NFormItem label="Email">
+          <NInput
+            v-model:value="editForm.email"
+            placeholder="jane@example.com"
+            autocomplete="off"
+          />
+        </NFormItem>
         <NFormItem label="Role">
           <NSelect v-model:value="editForm.role" :options="roleOptions" />
         </NFormItem>

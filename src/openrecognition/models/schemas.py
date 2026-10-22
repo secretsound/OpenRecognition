@@ -490,11 +490,13 @@ class LoginRequest(BaseModel):
 class SetupRequest(BaseModel):
     username: str = Field(default="admin", min_length=1, max_length=64)
     password: str = Field(min_length=8, max_length=72)
+    email: str | None = None
 
 
 class UserOut(BaseModel):
     id: str
     username: str
+    email: str | None = None
     role: str
     created_at: str
     groups: list[GroupBriefOut] = Field(default_factory=list)
@@ -504,12 +506,14 @@ class UserCreate(BaseModel):
     username: str
     password: str
     role: str = "operator"
+    email: str | None = None
     group_ids: list[str] | None = None
 
 
 class UserPatch(BaseModel):
     role: str | None = None
     password: str | None = None
+    email: str | None = None
     group_ids: list[str] | None = None
 
 
@@ -642,6 +646,7 @@ class AppSettingsOut(BaseModel):
     sso_auto_provision: bool = False
     sso_default_role: str = "viewer"
     sso_link_existing: bool = True
+    sso_match: Literal["username", "email"] = "username"
     sso_username_claim: str = "preferred_username"
     oidc_issuer: str = ""
     oidc_client_id: str = ""
@@ -772,6 +777,7 @@ class AppSettingsPatch(BaseModel):
     sso_auto_provision: bool | None = None
     sso_default_role: str | None = Field(None, max_length=16)
     sso_link_existing: bool | None = None
+    sso_match: Literal["username", "email"] | None = None
     sso_username_claim: str | None = Field(None, max_length=80)
     oidc_issuer: str | None = Field(None, max_length=500)
     oidc_client_id: str | None = Field(None, max_length=200)

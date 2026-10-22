@@ -21,7 +21,7 @@ const formRef = ref<FormInst | null>(null);
 const loading = ref(false);
 const checking = ref(true);
 const setupRequired = ref(false);
-const model = ref({ username: "admin", password: "", confirm: "" });
+const model = ref({ username: "admin", email: "", password: "", confirm: "" });
 
 const rules = computed<FormRules>(() => ({
   username: [{ required: true, message: t("login.userRequired"), trigger: "blur" }],
@@ -94,7 +94,11 @@ async function onSubmit() {
     const res = setupRequired.value
       ? await api<{ username: string; role: string }>("/v1/auth/setup", {
           method: "POST",
-          json: { username: model.value.username.trim(), password: model.value.password },
+          json: {
+            username: model.value.username.trim(),
+            password: model.value.password,
+            ...(model.value.email.trim() ? { email: model.value.email.trim() } : {}),
+          },
         })
       : await login(model.value.username, model.value.password);
     setSession(res.username, res.role);
@@ -125,8 +129,15 @@ async function onSubmit() {
       <template v-else>
       <p v-if="ssoError" class="login-error">{{ ssoError }}</p>
       <NForm ref="formRef" :model="model" :rules="rules" size="large" @submit.prevent="onSubmit">
-        <NFormItem path="username" :label="t('login.username')">
-          <NInput v-model:value="model.username" :placeholder="t('login.username')" autocomplete="username" />
+        <NFormItem path="username" :label="setupRequired ? t('login.username') : t('login.identifier')">
+          <NInput
+            v-model:value="model.username"
+            :placeholder="setupRequired ? t('login.username') : t('login.identifier')"
+            autocomplete="username"
+          />
+        </NFormItem>
+        <NFormItem v-if="setupRequired" path="email" :label="t('login.email')">
+          <NInput v-model:value="model.email" :placeholder="t('login.emailOptional')" autocomplete="off" />
         </NFormItem>
         <NFormItem path="password" :label="t('login.password')">
           <NInput

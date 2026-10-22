@@ -145,6 +145,7 @@ def _merged(state: AppState, body: AppSettingsPatch):
         "sso_auto_provision": pick("sso_auto_provision", settings.sso_auto_provision),
         "sso_default_role": pick("sso_default_role", settings.sso_default_role),
         "sso_link_existing": pick("sso_link_existing", settings.sso_link_existing),
+        "sso_match": pick("sso_match", settings.sso_match),
         "sso_username_claim": pick("sso_username_claim", settings.sso_username_claim),
         "oidc_issuer": pick("oidc_issuer", settings.oidc_issuer),
         "oidc_client_id": pick("oidc_client_id", settings.oidc_client_id),
@@ -234,6 +235,10 @@ def _validate_site(state: AppState, body: AppSettingsPatch) -> dict:
     if role not in SSO_ROLES:
         _fail("Default role must be viewer, operator, or admin")
     proposed["sso_default_role"] = role
+    match = str(proposed["sso_match"]).strip().lower()
+    if match not in ("username", "email"):
+        _fail("Match existing accounts by username or email")
+    proposed["sso_match"] = match
     label = " ".join(str(proposed["sso_label"]).split())
     if not label:
         label = "Single sign-on"
@@ -399,6 +404,7 @@ def settings_response(state: AppState) -> AppSettingsOut:
         sso_auto_provision=settings.sso_auto_provision,
         sso_default_role=settings.sso_default_role,
         sso_link_existing=settings.sso_link_existing,
+        sso_match=settings.sso_match,
         sso_username_claim=settings.sso_username_claim,
         oidc_issuer=settings.oidc_issuer,
         oidc_client_id=settings.oidc_client_id,

@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     sso_auto_provision: bool = False
     sso_default_role: str = "viewer"
     sso_link_existing: bool = True
+    sso_match: Literal["username", "email"] = "username"
     sso_username_claim: str = "preferred_username"
     oidc_issuer: str = ""
     oidc_client_id: str = ""

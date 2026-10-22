@@ -208,6 +208,7 @@ export interface GroupOut {
 export interface UserOut {
   id: string;
   username: string;
+  email?: string | null;
   role: string;
   created_at: string;
   groups?: GroupBriefOut[];
@@ -530,6 +531,7 @@ export interface AppSettingsOut {
   sso_auto_provision?: boolean;
   sso_default_role?: string;
   sso_link_existing?: boolean;
+  sso_match?: "username" | "email";
   sso_username_claim?: string;
   oidc_issuer?: string;
   oidc_client_id?: string;
@@ -648,6 +650,7 @@ export interface AppSettingsPatch {
   sso_auto_provision?: boolean;
   sso_default_role?: string;
   sso_link_existing?: boolean;
+  sso_match?: "username" | "email";
   sso_username_claim?: string;
   oidc_issuer?: string;
   oidc_client_id?: string;

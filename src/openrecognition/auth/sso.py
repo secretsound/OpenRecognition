@@ -144,6 +144,7 @@ def login_identity(
     subject: str,
     protocol: str,
     groups: list[str],
+    email: str | None = None,
 ) -> str:
     settings = state.settings
     try:
@@ -154,6 +155,8 @@ def login_identity(
             role=settings.sso_default_role,
             link_existing=settings.sso_link_existing,
             auto_provision=settings.sso_auto_provision,
+            email=email,
+            match=settings.sso_match,
         )
     except ValueError as exc:
         text = str(exc)
@@ -244,6 +247,11 @@ def finish_oidc(state: AppState, request, code: str, sid: str) -> tuple[str, str
         username = string_claim(claims, settings.sso_username_claim, "preferred_username", "email", "sub")
         groups = group_claim(claims, settings.oidc_groups_claim)
         subject = string_claim(claims, "sub")
+        email = ""
+        try:
+            email = string_claim(claims, "email")
+        except OidcError:
+            email = username if "@" in username else ""
     except OidcError as exc:
         raise SsoError(exc.code) from exc
     user_id = login_identity(
@@ -252,6 +260,7 @@ def finish_oidc(state: AppState, request, code: str, sid: str) -> tuple[str, str
         subject=subject,
         protocol="oidc",
         groups=groups,
+        email=email or None,
     )
     return user_id, safe_next(str(payload.get("next") or "/"))
 
@@ -289,6 +298,7 @@ def finish_saml(state: AppState, request, saml_response: str, sid: str) -> tuple
         subject=f"saml:{identity['username']}",
         protocol="saml",
         groups=identity["groups"],
+        email=identity.get("email") or None,
     )
     return user_id, safe_next(str(payload.get("next") or "/"))
 

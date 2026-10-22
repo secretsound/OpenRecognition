@@ -42,6 +42,7 @@ export interface SettingsDraft {
   sso_auto_provision: boolean;
   sso_default_role: string;
   sso_link_existing: boolean;
+  sso_match: "username" | "email";
   sso_username_claim: string;
   oidc_issuer: string;
   oidc_client_id: string;
@@ -100,6 +101,7 @@ export function draftFrom(s: AppSettingsOut): SettingsDraft {
     sso_auto_provision: s.sso_auto_provision ?? false,
     sso_default_role: s.sso_default_role ?? "viewer",
     sso_link_existing: s.sso_link_existing ?? true,
+    sso_match: s.sso_match === "email" ? "email" : "username",
     sso_username_claim: s.sso_username_claim ?? "preferred_username",
     oidc_issuer: s.oidc_issuer ?? "",
     oidc_client_id: s.oidc_client_id ?? "",
@@ -237,6 +239,7 @@ export function draftPatch(draft: SettingsDraft): AppSettingsPatch {
     sso_auto_provision: draft.sso_auto_provision,
     sso_default_role: draft.sso_default_role,
     sso_link_existing: draft.sso_link_existing,
+    sso_match: draft.sso_match,
     sso_username_claim: draft.sso_username_claim.trim(),
     oidc_issuer: draft.oidc_issuer.trim(),
     oidc_client_id: draft.oidc_client_id.trim(),

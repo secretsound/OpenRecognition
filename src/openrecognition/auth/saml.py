@@ -146,6 +146,18 @@ def _text(element: etree._Element, path: str) -> str:
     return found.text.strip()
 
 
+def _attribute(assertion: etree._Element, names: set[str]) -> str:
+    folded = {name.casefold() for name in names}
+    for attr in assertion.findall(".//saml:Attribute", NS):
+        name = (attr.get("Name") or "").strip()
+        friendly = (attr.get("FriendlyName") or "").strip()
+        if name in names or name.casefold() in folded or friendly.casefold() in folded:
+            value = _text(attr, "saml:AttributeValue")
+            if value:
+                return value
+    return ""
+
+
 def _within(moment: datetime.datetime | None, *, not_after: bool, now: datetime.datetime) -> None:
     if moment is None:
         return
@@ -238,6 +250,17 @@ def verify_response(
         username = _text(assertion, ".//saml:NameID")
     if not username:
         _reject("invalid", "username")
+    email = _attribute(
+        assertion,
+        {
+            "email",
+            "mail",
+            "emailaddress",
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+        },
+    )
+    if not email and "@" in username:
+        email = username
     groups: list[str] = []
     if groups_attr:
         for attr in assertion.findall(".//saml:Attribute", NS):
@@ -247,4 +270,4 @@ def verify_response(
                     for item in attr.findall("saml:AttributeValue", NS)
                     if item.text and item.text.strip()
                 ]
-    return {"username": username, "groups": groups}
+    return {"username": username, "email": email, "groups": groups}
