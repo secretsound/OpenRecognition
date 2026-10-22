@@ -46,6 +46,8 @@ env:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.platforms.outputs.matrix }}
     steps:
       - name: Check the extra tag
         env:
@@ -68,23 +70,37 @@ jobs:
             exit 1
           fi
 
+      # Job-level if cannot read matrix, so the selected platforms are a matrix
+      # output. linux/arm64 is omitted entirely when the input is amd64 only.
+      - name: Choose platforms
+        id: platforms
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          amd64='{"platform":"linux/amd64","arch":"amd64","runner":"ubuntu-latest","smoke":true}'
+          arm64='{"platform":"linux/arm64","arch":"arm64","runner":"ubuntu-24.04-arm","smoke":false}'
+          case "$PLATFORMS" in
+            linux/amd64)
+              include="[$amd64]"
+              ;;
+            linux/amd64,linux/arm64)
+              include="[$amd64,$arm64]"
+              ;;
+            *)
+              echo "Unexpected platforms: $PLATFORMS" >&2
+              exit 1
+              ;;
+          esac
+          echo "matrix={\"include\":${include}}" >> "$GITHUB_OUTPUT"
+
   build:
     needs: guard
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
-    if: contains(inputs.platforms, matrix.platform)
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            arch: amd64
-            runner: ubuntu-latest
-            smoke: true
-          - platform: linux/arm64
-            arch: arm64
-            runner: ubuntu-24.04-arm
-            smoke: false
+      matrix: ${{ fromJSON(needs.guard.outputs.matrix) }}
     steps:
       - name: Check out the selected ref
         uses: actions/checkout@v7
