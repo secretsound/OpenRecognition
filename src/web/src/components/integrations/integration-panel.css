@@ -400,10 +400,6 @@
   font-weight: 600;
 }
 
-.mcp-group + .mcp-group {
-  margin-top: 8px;
-  border-top: 1px solid var(--or-line, var(--n-border-color));
-}
 
 .wy-ha-card {
   display: flex;
@@ -423,15 +419,6 @@
   min-width: 0;
   font-size: 0.9375rem;
   font-weight: 650;
-}
-
-.mcp-group__title {
-  margin: 16px 0 0;
-  font-size: 0.8125rem;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--n-text-color-3);
 }
 
 .or-list-card {

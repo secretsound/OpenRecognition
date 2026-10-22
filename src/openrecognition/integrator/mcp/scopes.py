@@ -9,12 +9,13 @@ from openrecognition.integrator.mcp.catalog import (
     McpToolMeta,
 )
 
-API_SCOPES = frozenset({"read", "recognize", "enroll", "admin"})
+API_SCOPES = frozenset({"read", "recognize", "enroll", "update", "delete", "admin"})
+SCOPE_ORDER = ("read", "recognize", "enroll", "update", "delete", "admin")
 
 SCOPE_GROUPS: list[dict[str, str]] = [
     {
         "id": "read",
-        "label": "Read",
+        "label": "View",
         "description": "Health, capabilities, enrollments list, and presence.",
     },
     {
@@ -24,10 +25,40 @@ SCOPE_GROUPS: list[dict[str, str]] = [
     },
     {
         "id": "enroll",
-        "label": "Enroll",
-        "description": "Create identities from local media files.",
+        "label": "Add",
+        "description": "Create identities and add samples.",
+    },
+    {
+        "id": "update",
+        "label": "Update",
+        "description": "Change existing identities and their samples.",
+    },
+    {
+        "id": "delete",
+        "label": "Delete",
+        "description": "Remove identities from the library.",
     },
 ]
+
+
+def normalize_key_scopes(scopes: list[str]) -> list[str]:
+    """One permission list for the REST API and for MCP tools.
+
+    ``admin`` already includes the others, so it is stored on its own.
+    """
+    chosen: set[str] = set()
+    for raw in scopes:
+        scope = raw.strip()
+        if not scope:
+            continue
+        if scope not in API_SCOPES:
+            raise ValueError(f"Unknown permission: {scope}")
+        chosen.add(scope)
+    if not chosen:
+        raise ValueError("Choose at least one permission")
+    if "admin" in chosen:
+        return ["admin"]
+    return [scope for scope in SCOPE_ORDER if scope in chosen]
 
 
 def allows(scope_required: str, granted: list[str]) -> bool:

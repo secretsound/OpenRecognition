@@ -5,59 +5,58 @@ import {
   NDataTable,
   NButton,
   NModal,
-  NTag,
-  NSpace,
-  NAlert,
   NPopconfirm,
   NIcon,
+  NAlert,
   NCode,
   useMessage,
 } from "naive-ui";
 import type { DataTableColumns } from "naive-ui";
-import { AddOutline, TrashOutline, CopyOutline } from "@vicons/ionicons5";
-import { api, loadFailureMessage } from "@/api/client";
-import type { ApiKeyOut, ApiKeyCreated } from "@/types/api";
+import { AddOutline, TrashOutline, CopyOutline, CreateOutline, KeyOutline } from "@vicons/ionicons5";
+import { api, ApiError, loadFailureMessage } from "@/api/client";
+import type { ApiKeyCreated, ApiKeyOut } from "@/types/api";
 import PageHeader from "@/components/kit/PageHeader.vue";
-import { formatAbsolute } from "@/utils/time";
 import DataList from "@/components/kit/DataList.vue";
 import ContentSkeleton from "@/components/kit/ContentSkeleton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import Chip from "@/components/kit/Chip.vue";
+import TimeAgo from "@/components/kit/TimeAgo.vue";
 import CreateApiKeyModal from "@/components/CreateApiKeyModal.vue";
-import { KeyOutline } from "@vicons/ionicons5";
-import { ApiError } from "@/api/client";
 import { useMcpCatalog } from "@/composables/useMcpCatalog";
+import { permissionChips, type KeyPreset } from "@/utils/keyPermissions";
 
 const message = useMessage();
 const route = useRoute();
 const router = useRouter();
-const { catalog, ensureCatalog, hostConfigWithKey } = useMcpCatalog();
+const { ensureCatalog, hostConfigWithKey } = useMcpCatalog();
 
 const loading = ref(true);
 const loadError = ref<string | null>(null);
 const rows = ref<ApiKeyOut[]>([]);
-const showCreate = ref(false);
-const createPreset = ref<"default" | "mcp" | "integration">("default");
+const showEditor = ref(false);
+const createPreset = ref<KeyPreset>("default");
+const editing = ref<ApiKeyOut | null>(null);
 const showKeyModal = ref(false);
 const createdKey = ref<string | null>(null);
-const createdMcpTools = ref<ApiKeyCreated["mcp_tools"]>([]);
 const revokingId = ref<string | null>(null);
-
-const showMcpSuccessExtras = computed(
-  () => createdMcpTools.value.length > 0 && hostConfigWithKey(createdKey.value ?? ""),
-);
 
 const mcpHostConfig = computed(() =>
   createdKey.value ? hostConfigWithKey(createdKey.value) : "",
 );
 
-function openCreate(preset: "default" | "mcp" | "integration" = "default") {
+function openCreate(preset: KeyPreset = "default") {
+  editing.value = null;
   createPreset.value = preset;
-  showCreate.value = true;
+  showEditor.value = true;
+}
+
+function openEdit(row: ApiKeyOut) {
+  editing.value = row;
+  showEditor.value = true;
 }
 
 function onKeyCreated(res: ApiKeyCreated) {
   createdKey.value = res.key;
-  createdMcpTools.value = res.mcp_tools ?? [];
   showKeyModal.value = true;
   if (route.query.for === "mcp") {
     router.replace({ path: "/keys" });
@@ -65,111 +64,104 @@ function onKeyCreated(res: ApiKeyCreated) {
   void load();
 }
 
+function permissionCell(scopes: string[]) {
+  const chips = permissionChips(scopes);
+  if (!chips.length) return h("span", { class: "muted-cell" }, "None");
+  return h(
+    "span",
+    { class: "key-perms" },
+    chips.map((chip) => h(Chip, { key: chip.id, tone: chip.tone, size: "sm" }, () => chip.label)),
+  );
+}
+
 const columns: DataTableColumns<ApiKeyOut> = [
   {
     title: "Name",
     key: "name",
-    minWidth: 120,
+    minWidth: 160,
     ellipsis: { tooltip: true },
     sorter: (a, b) => a.name.localeCompare(b.name),
-  },
-  {
-    title: "REST API",
-    key: "scopes",
-    minWidth: 130,
     render(row) {
-      if (!row.scopes?.length) return h("span", { class: "muted-cell" }, "—");
-      return h(
-        NSpace,
-        { size: 4, wrap: true },
-        () =>
-          row.scopes.map((scope) =>
-            h(
-              NTag,
-              {
-                size: "small",
-                round: true,
-                bordered: false,
-                type: scope === "admin" ? "warning" : "default",
-              },
-              () => scope,
-            ),
-          ),
-      );
+      return h("span", { class: "key-name" }, row.name);
     },
   },
   {
-    title: "MCP",
-    key: "mcp_tool_allowlist",
-    minWidth: 160,
+    title: "Permissions",
+    key: "scopes",
+    minWidth: 220,
     render(row) {
-      if (row.mcp_tool_allowlist === null) {
-        return h("span", { class: "muted-cell" }, row.scopes?.length ? "All in scope" : "—");
-      }
-      if (!row.mcp_tool_allowlist.length) {
-        return h("span", { class: "muted-cell" }, "—");
-      }
-      return h(
-        NSpace,
-        { size: 4, wrap: true },
-        () =>
-          row.mcp_tool_allowlist!.map((name) =>
-            h(NTag, { size: "small", round: true, bordered: false }, () => name),
-          ),
-      );
+      return permissionCell(row.scopes);
     },
   },
   {
     title: "Last used",
     key: "last_used_at",
-    width: 168,
+    width: 140,
     render(row) {
       return row.last_used_at
-        ? formatAbsolute(row.last_used_at)
+        ? h(TimeAgo, { value: row.last_used_at })
         : h("span", { class: "muted-cell" }, "Never");
     },
   },
   {
     title: "Created",
     key: "created_at",
-    width: 168,
+    width: 140,
     sorter: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     render(row) {
-      return formatAbsolute(row.created_at);
+      return h(TimeAgo, { value: row.created_at });
     },
   },
   {
     title: "",
     key: "actions",
-    width: 52,
+    width: 88,
     fixed: "right",
     render(row) {
-      return h(
-        NPopconfirm,
-        {
-          onPositiveClick: () => {
-            void revoke(row.id);
+      return h("div", { class: "row-actions", onClick: (e: Event) => e.stopPropagation() }, [
+        h(
+          NButton,
+          {
+            quaternary: true,
+            size: "small",
+            "aria-label": `Edit ${row.name}`,
+            onClick: () => openEdit(row),
           },
-        },
-        {
-          trigger: () =>
-            h(
-              NButton,
-              {
-                quaternary: true,
-                size: "small",
-                "aria-label": "Delete key",
-                loading: revokingId.value === row.id,
-                onClick: (e: Event) => e.stopPropagation(),
-              },
-              { icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) },
-            ),
-          default: () => `Delete API key "${row.name}"? Integrations using it will stop working.`,
-        },
-      );
+          { icon: () => h(NIcon, null, { default: () => h(CreateOutline) }) },
+        ),
+        h(
+          NPopconfirm,
+          {
+            onPositiveClick: () => {
+              void revoke(row.id);
+            },
+          },
+          {
+            trigger: () =>
+              h(
+                NButton,
+                {
+                  quaternary: true,
+                  size: "small",
+                  "aria-label": `Delete ${row.name}`,
+                  loading: revokingId.value === row.id,
+                },
+                { icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) },
+              ),
+            default: () => `Delete “${row.name}”? Apps and assistants using it will stop working.`,
+          },
+        ),
+      ]);
     },
   },
 ];
+
+function rowProps(row: ApiKeyOut) {
+  return {
+    style: "cursor: pointer",
+    onClick: () => openEdit(row),
+  };
+}
 
 async function load() {
   loading.value = true;
@@ -208,15 +200,13 @@ async function copyText(text: string, label: string) {
 
 onMounted(async () => {
   await Promise.all([load(), ensureCatalog().catch(() => null)]);
-  if (route.query.for === "mcp") {
-    openCreate("mcp");
-  }
+  if (route.query.for === "mcp") openCreate("mcp");
 });
 
 watch(
   () => route.query.for,
-  (v) => {
-    if (v === "mcp" && !showCreate.value) openCreate("mcp");
+  (value) => {
+    if (value === "mcp" && !showEditor.value) openCreate("mcp");
   },
 );
 </script>
@@ -225,7 +215,7 @@ watch(
   <div class="or-page">
     <PageHeader
       title="API keys"
-      description="Keys let other apps call this server. REST is the web API. MCP is the tool list an AI assistant can use."
+      description="Keys let apps and assistants call this server. Each permission works the same way over the REST API and over MCP."
     >
       <template #action>
         <NButton type="primary" @click="openCreate('default')">
@@ -248,7 +238,7 @@ watch(
     <EmptyState
       v-else-if="!loading && rows.length === 0"
       title="No API keys"
-      description="Create a key with REST scopes, MCP tools, or both."
+      description="Create a key for Home Assistant, an assistant, or any other app that should call this server."
       :icon="KeyOutline"
       action-label="Create key"
       @action="openCreate('default')"
@@ -264,23 +254,38 @@ watch(
               :bordered="false"
               size="medium"
               :row-key="(row: ApiKeyOut) => row.id"
+              :row-props="rowProps"
             />
           </div>
         </template>
         <template #card="{ item }">
-          <div class="or-list-card key-card">
+          <div class="or-list-card key-card" @click="openEdit(item)">
             <span class="or-list-card__title">{{ item.name }}</span>
+            <span class="key-perms">
+              <Chip
+                v-for="chip in permissionChips(item.scopes)"
+                :key="chip.id"
+                :tone="chip.tone"
+                size="sm"
+              >
+                {{ chip.label }}
+              </Chip>
+            </span>
             <span class="or-list-card__meta">
               <span>
                 Last used
-                {{ item.last_used_at ? formatAbsolute(item.last_used_at) : "never" }}
+                {{ item.last_used_at ? "" : "never" }}
+                <TimeAgo v-if="item.last_used_at" :value="item.last_used_at" />
               </span>
-              <NPopconfirm @positive-click="revoke(item.id)">
-                <template #trigger>
-                  <NButton size="small" quaternary type="error">Remove</NButton>
-                </template>
-                Delete API key "{{ item.name }}"? Apps using it will stop working.
-              </NPopconfirm>
+              <span class="card-actions" @click.stop>
+                <NButton size="small" quaternary @click="openEdit(item)">Edit</NButton>
+                <NPopconfirm @positive-click="revoke(item.id)">
+                  <template #trigger>
+                    <NButton size="small" quaternary type="error">Delete</NButton>
+                  </template>
+                  Delete “{{ item.name }}”? Apps and assistants using it will stop working.
+                </NPopconfirm>
+              </span>
             </span>
           </div>
         </template>
@@ -291,10 +296,12 @@ watch(
     </template>
 
     <CreateApiKeyModal
-      v-model:show="showCreate"
-      :catalog="catalog"
+      v-model:show="showEditor"
       :preset="createPreset"
+      :editing="editing"
       @created="onKeyCreated"
+      @saved="load"
+      @removed="load"
     />
 
     <NModal
@@ -305,20 +312,22 @@ watch(
       :mask-closable="false"
     >
       <NAlert type="warning" :bordered="false">
-        This secret is shown once. Copy it before closing.
+        Copy this secret now. It is shown only this once. Use it as a Bearer token or in an assistant setup.
       </NAlert>
-
       <code class="key-display">{{ createdKey }}</code>
 
-      <template v-if="showMcpSuccessExtras">
-        <p class="mcp-note">
-          MCP is the tool list an assistant uses. Paste this host configuration into that assistant.
-        </p>
-        <NButton text type="primary" @click="copyText(mcpHostConfig, 'MCP host config')">
-          Copy assistant configuration
-        </NButton>
-        <NCode :code="mcpHostConfig" language="json" word-wrap class="mcp-config-code" />
-      </template>
+      <section v-if="mcpHostConfig" class="setup-block">
+        <div class="setup-block__head">
+          <div>
+            <h3>Assistant setup</h3>
+            <p>Paste this into Cursor, Claude, or a similar app. The key is already filled in.</p>
+          </div>
+          <NButton text type="primary" @click="copyText(mcpHostConfig, 'assistant setup')">
+            Copy setup
+          </NButton>
+        </div>
+        <NCode :code="mcpHostConfig" language="json" word-wrap class="setup-code" />
+      </section>
 
       <template #footer>
         <div class="or-modal-footer">
@@ -337,46 +346,72 @@ watch(
 
 <style scoped>
 .key-card {
-  cursor: default;
+  cursor: pointer;
+}
+
+.card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+:deep(.key-name) {
+  font-weight: 600;
+}
+
+:deep(.key-perms) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 :deep(.muted-cell) {
-  color: var(--n-text-color-3);
-  font-size: 0.8125rem;
+  color: var(--or-text-3, var(--n-text-color-3));
+}
+
+:deep(.row-actions) {
+  display: flex;
+  gap: 4px;
+  align-items: center;
 }
 
 .key-display {
   display: block;
   margin-top: 12px;
   padding: 12px;
-  background: var(--n-code-color);
+  background: var(--or-surface-sunken, var(--n-code-color));
   border-radius: 8px;
   font-size: 0.8rem;
   word-break: break-all;
 }
 
-.mcp-note {
-  margin: 16px 0 8px;
-  color: var(--n-text-color-3);
+.setup-block {
+  margin-top: 20px;
+}
+
+.setup-block__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.setup-block h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.setup-block p {
+  margin: 4px 0 0;
+  color: var(--or-text-3, var(--n-text-color-3));
   font-size: 0.8125rem;
   line-height: 1.45;
 }
 
-.success-mcp-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 16px 0 8px;
-}
-
-.success-mcp-label {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--n-text-color-2);
-}
-
-.mcp-config-code {
+.setup-code {
   display: block;
   max-height: 200px;
   overflow: auto;

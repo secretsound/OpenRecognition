@@ -308,7 +308,8 @@ const columns = computed<DataTableColumns<SampleOut>>(() => [
   {
     title: "",
     key: "actions",
-    width: 56,
+    width: 80,
+    className: "actions-cell",
     render(row: SampleOut) {
       return h(
         "div",
@@ -517,5 +518,15 @@ defineExpose({ reload: load });
 
 .fit-ok {
   color: var(--or-text-2);
+}
+
+:deep(.actions-cell) {
+  width: 80px;
+}
+
+:deep(.sample-row-actions) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 </style>

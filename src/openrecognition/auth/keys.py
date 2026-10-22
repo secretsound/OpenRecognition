@@ -38,23 +38,20 @@ class ApiKeyService:
         name: str,
         scopes: list[str],
         plaintext: str | None = None,
-        *,
-        mcp_tools: list[str] | None = None,
     ) -> dict[str, Any]:
         key = plaintext or f"or_{secrets.token_urlsafe(32)}"
         kid = str(uuid.uuid4())
         now = _now()
-        mcp_json = json_dumps(mcp_tools) if mcp_tools is not None else None
         self.db.execute(
             """INSERT INTO api_keys (id, name, key_hash, scopes, mcp_tools, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (kid, name, hash_key(key), json_dumps(scopes), mcp_json, now),
+               VALUES (?, ?, ?, ?, NULL, ?)""",
+            (kid, name, hash_key(key), json_dumps(scopes), now),
         )
         return {
             "id": kid,
             "name": name,
             "scopes": scopes,
-            "mcp_tool_allowlist": mcp_tools,
+            "mcp_tool_allowlist": None,
             "key": key,
             "created_at": now,
             "last_used_at": None,
@@ -70,20 +67,43 @@ class ApiKeyService:
             sql += " WHERE revoked_at IS NULL"
         sql += " ORDER BY created_at DESC"
         rows = self.db.fetchall(sql)
-        return [
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "scopes": json_loads(r["scopes"]),
-                "mcp_tool_allowlist": json_loads(r["mcp_tools"])
-                if r["mcp_tools"]
-                else None,
-                "created_at": r["created_at"],
-                "last_used_at": r["last_used_at"],
-                "revoked_at": r["revoked_at"],
-            }
-            for r in rows
-        ]
+        return [self._public_from_row(r) for r in rows]
+
+    def get_key(self, kid: str) -> dict[str, Any] | None:
+        row = self.db.fetchone(
+            """SELECT id, name, scopes, created_at, last_used_at, revoked_at
+               FROM api_keys WHERE id = ?""",
+            (kid,),
+        )
+        if not row or row["revoked_at"]:
+            return None
+        return self._public_from_row(row)
+
+    def update_key(
+        self,
+        kid: str,
+        *,
+        name: str | None = None,
+        scopes: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        if self.get_key(kid) is None:
+            return None
+        sets: list[str] = []
+        params: list[Any] = []
+        if name is not None:
+            sets.append("name = ?")
+            params.append(name)
+        if scopes is not None:
+            sets.append("scopes = ?")
+            params.append(json_dumps(scopes))
+            sets.append("mcp_tools = NULL")
+        if sets:
+            params.append(kid)
+            self.db.execute(
+                f"UPDATE api_keys SET {', '.join(sets)} WHERE id = ?",
+                tuple(params),
+            )
+        return self.get_key(kid)
 
     def revoke_key(self, kid: str) -> bool:
         """Permanently remove an API key (UI labels this Delete)."""
@@ -120,13 +140,22 @@ class ApiKeyService:
             (_now(), key_id),
         )
 
-    def _auth_from_row(self, row) -> dict[str, Any]:
-        mcp_raw = row["mcp_tools"]
+    def _public_from_row(self, row) -> dict[str, Any]:
         return {
             "id": row["id"],
             "name": row["name"],
             "scopes": json_loads(row["scopes"]),
-            "mcp_tool_allowlist": json_loads(mcp_raw) if mcp_raw else None,
+            "mcp_tool_allowlist": None,
+            "created_at": row["created_at"],
+            "last_used_at": row["last_used_at"],
+            "revoked_at": row["revoked_at"],
+        }
+
+    def _auth_from_row(self, row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "scopes": json_loads(row["scopes"]),
         }
 
     def has_scope(self, auth: dict[str, Any] | None, scope: str) -> bool:

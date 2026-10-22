@@ -1,6 +1,32 @@
 """SQLite schema migrations (additive)."""
 
+import json
 import sqlite3
+
+_SCOPE_ORDER = ("read", "recognize", "enroll", "update", "delete", "admin")
+
+
+def _expand_legacy_enroll_scopes(conn: sqlite3.Connection) -> None:
+    """Older enroll keys could also change and remove profiles. Keep that ability."""
+    rows = conn.execute("SELECT id, scopes FROM api_keys").fetchall()
+    for row in rows:
+        try:
+            scopes = json.loads(row["scopes"])
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(scopes, list) or "admin" in scopes or "enroll" not in scopes:
+            continue
+        merged = set(scopes)
+        merged.update(("update", "delete"))
+        ordered = [scope for scope in _SCOPE_ORDER if scope in merged]
+        current = [scope for scope in _SCOPE_ORDER if scope in scopes]
+        extras = [scope for scope in scopes if scope not in _SCOPE_ORDER]
+        if ordered == current and not extras:
+            continue
+        conn.execute(
+            "UPDATE api_keys SET scopes = ? WHERE id = ?",
+            (json.dumps(ordered + extras), row["id"]),
+        )
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -81,6 +107,9 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     key_cols = _columns(conn, "api_keys")
     if "mcp_tools" not in key_cols:
         conn.execute("ALTER TABLE api_keys ADD COLUMN mcp_tools TEXT")
+    # Permissions are scopes. A scope covers the REST API and the MCP tools for that action.
+    conn.execute("UPDATE api_keys SET mcp_tools = NULL WHERE mcp_tools IS NOT NULL")
+    _expand_legacy_enroll_scopes(conn)
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)")
 

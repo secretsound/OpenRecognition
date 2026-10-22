@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch, type VNode } from "vue";
+import { computed, h, onMounted, ref, watch, type Component, type VNode } from "vue";
 import { useRouter } from "vue-router";
 import {
   NButton,
@@ -13,6 +13,7 @@ import {
   NDataTable,
   NDropdown,
   NModal,
+  NTooltip,
   NForm,
   NFormItem,
   NInputNumber,
@@ -20,7 +21,7 @@ import {
   useMessage,
 } from "naive-ui";
 import type { DataTableColumns, SelectOption } from "naive-ui";
-import { CloudDownloadOutline, TrashOutline } from "@vicons/ionicons5";
+import { CloudDownloadOutline, CreateOutline, EllipsisHorizontalOutline } from "@vicons/ionicons5";
 import { api } from "@/api/client";
 import type {
   InferenceBackend,
@@ -748,6 +749,61 @@ const contractFields = computed(() => {
     }));
 });
 
+function confirmRemove(row: ModelCatalogEntry) {
+  dialog.warning({
+    title: "Remove model",
+    content: `Remove ${modelTitle(row)} from this server?`,
+    positiveText: "Remove",
+    negativeText: "Cancel",
+    onPositiveClick: () => deleteOne(row.key),
+  });
+}
+
+function modelMenu(row: ModelCatalogEntry): { label: string; key: string }[] {
+  const items: { label: string; key: string }[] = [];
+  if (!row.active) items.push({ label: "Use", key: "use" });
+  if (row.on_disk) items.push({ label: "Re-download", key: "redownload" });
+  else items.push({ label: "Download", key: "download" });
+  if (isCustom(row)) {
+    items.push({ label: "Details", key: "details" });
+    items.push({ label: "Delete", key: "delete" });
+  }
+  if (canRemove(row)) items.push({ label: "Remove", key: "remove" });
+  return items;
+}
+
+function iconAction(
+  label: string,
+  icon: Component,
+  opts: { loading?: boolean; onClick?: () => void } = {},
+) {
+  return h(NTooltip, null, {
+    trigger: () =>
+      h(
+        NButton,
+        {
+          quaternary: true,
+          circle: true,
+          size: "small",
+          "aria-label": label,
+          loading: opts.loading,
+          onClick: opts.onClick,
+        },
+        { icon: () => h(NIcon, { size: 18 }, () => h(icon)) },
+      ),
+    default: () => label,
+  });
+}
+
+function onModelMenu(row: ModelCatalogEntry, key: string) {
+  if (key === "use") requestUse(row);
+  else if (key === "download") downloadOne(row.key, false);
+  else if (key === "redownload") downloadOne(row.key, true);
+  else if (key === "details") openEditModel(row);
+  else if (key === "delete") confirmDeleteModel(row);
+  else if (key === "remove") confirmRemove(row);
+}
+
 function confirmDeleteModel(row: ModelCatalogEntry) {
   const kept = keptCount(row);
   if (kept > 0) {
@@ -839,78 +895,45 @@ const columns = computed<DataTableColumns<ModelCatalogEntry>>(() => [
   {
     title: "",
     key: "actions",
-    width: 240,
+    width: 96,
+    minWidth: 96,
     className: "actions-cell",
     render(row) {
+      const menu = modelMenu(row);
       const actions: VNode[] = [];
-      if (!row.active) {
-        actions.push(
-          h(
-            NButton,
-            {
-              size: "small",
-              loading: usingKey.value === row.key,
-              onClick: () => requestUse(row),
-            },
-            { default: () => "Use" },
-          ),
-        );
-      }
-      actions.push(
-        h(
-          NButton,
-          {
-            size: "small",
-            loading: downloadingKey.value === row.key,
-            onClick: () => downloadOne(row.key, row.on_disk),
-          },
-          { default: () => (row.on_disk ? "Re-download" : "Download") },
-        ),
-      );
       if (canEdit(row)) {
-        actions.push(
-          h(NButton, { size: "small", onClick: () => openSettings(row) }, { default: () => "Edit" }),
-        );
+        actions.push(iconAction("Edit", CreateOutline, { onClick: () => openSettings(row) }));
       }
-      if (isCustom(row)) {
+      if (menu.length) {
         actions.push(
           h(
             NDropdown,
             {
-              options: [
-                { label: "Details", key: "edit" },
-                { label: "Delete", key: "delete" },
-              ],
-              onSelect: (key: string) => {
-                if (key === "edit") openEditModel(row);
-                else confirmDeleteModel(row);
-              },
+              options: menu,
+              onSelect: (key: string) => onModelMenu(row, key),
             },
-            { default: () => h(NButton, { size: "small", quaternary: true }, { default: () => "More" }) },
-          ),
-        );
-      }
-      if (canRemove(row)) {
-        actions.push(
-          h(
-            NPopconfirm,
-            { onPositiveClick: () => deleteOne(row.key) },
             {
-              trigger: () =>
+              default: () =>
                 h(
                   NButton,
-                  { size: "small", quaternary: true, loading: deletingKey.value === row.key },
                   {
-                    icon: () => h(NIcon, null, { default: () => h(TrashOutline) }),
-                    default: () => "Remove",
+                    quaternary: true,
+                    circle: true,
+                    size: "small",
+                    "aria-label": `More actions for ${modelTitle(row)}`,
+                    title: "More",
+                    loading:
+                      usingKey.value === row.key ||
+                      downloadingKey.value === row.key ||
+                      deletingKey.value === row.key,
                   },
+                  { icon: () => h(NIcon, { size: 18 }, () => h(EllipsisHorizontalOutline)) },
                 ),
-              default: () => `Remove ${modelTitle(row)} from this server?`,
             },
           ),
         );
       }
-      return h("div", { class: "row-actions" }, actions);
+      return h("div", { class: "row-actions table-actions", onClick: (e: Event) => e.stopPropagation() }, actions);
     },
   },
 ]);
@@ -1389,7 +1412,30 @@ onMounted(() => {
 }
 
 .models-table :deep(.actions-cell) {
-  vertical-align: bottom;
+  vertical-align: middle;
+  width: 96px;
+}
+
+.models-table :deep(.table-actions) {
+  width: 100%;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.models-table :deep(.table-actions > *) {
+  flex: none;
+  width: auto;
+}
+
+.models-table :deep(.table-actions > :first-child) {
+  margin-left: auto;
+}
+
+.models-table :deep(.table-actions .n-button) {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
 }
 
 .models-table :deep(.is-active-row .n-data-table-td:first-child) {

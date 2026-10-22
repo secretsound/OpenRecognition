@@ -29,6 +29,7 @@ dependencies = [
   "zeroconf>=0.132.0",
   "cryptography>=42",
   "signxml>=4.0",
+  "mcp>=1.6.0",
 ]
 
 [project.optional-dependencies]

@@ -18,16 +18,17 @@ from openrecognition.auth.sso import (
     start_login,
 )
 from openrecognition.integrator.mcp.scopes import (
+    normalize_key_scopes,
     resolve_mcp_resources,
     resolve_mcp_tools,
     scopes_from_tool_names,
     validate_mcp_tool_names,
-    validate_mcp_tools_fit_rest_scopes,
 )
 from openrecognition.models.schemas import (
     ApiKeyCreate,
     ApiKeyCreated,
     ApiKeyOut,
+    ApiKeyUpdate,
     AuthMeOut,
     EnrollmentGrantOut,
     GroupBriefOut,
@@ -68,45 +69,37 @@ def _session_cookie(
     )
 
 
-def _mcp_access(
-    scopes: list[str],
-    tool_allowlist: list[str] | None = None,
-) -> tuple[list[McpToolOut], list[McpResourceOut]]:
-    tools = resolve_mcp_tools(scopes, tool_allowlist)
+def _mcp_access(scopes: list[str]) -> tuple[list[McpToolOut], list[McpResourceOut]]:
+    tools = resolve_mcp_tools(scopes, None)
     resources = resolve_mcp_resources(tools)
     return ([McpToolOut(**t) for t in tools], [McpResourceOut(**r) for r in resources])
 
 
-def _resolve_key_create(body: ApiKeyCreate) -> tuple[list[str], list[str] | None]:
-    rest_scopes = list(body.scopes or [])
-    mcp_field_set = body.mcp_tools is not None
+def _clean_name(name: str) -> str:
+    cleaned = name.strip()
+    if not cleaned:
+        raise bad_request("INVALID_KEY", "Name is required")
+    if len(cleaned) > 80:
+        raise bad_request("INVALID_KEY", "Use 80 characters or fewer")
+    return cleaned
 
-    if mcp_field_set:
+
+def _scopes_from_body(
+    scopes: list[str] | None,
+    mcp_tools: list[str] | None = None,
+) -> list[str]:
+    """Permissions cover the REST API and MCP. Tool names only fill in a missing list."""
+    chosen = list(scopes or [])
+    if not chosen and mcp_tools:
         try:
-            allowlist = validate_mcp_tool_names(body.mcp_tools or [])
+            names = validate_mcp_tool_names(mcp_tools)
         except ValueError as exc:
-            raise bad_request("INVALID_MCP_TOOLS", str(exc)) from exc
-        tool_scopes = scopes_from_tool_names(allowlist) if allowlist else []
-        scopes = sorted(set(rest_scopes) | set(tool_scopes))
-        if not scopes and not allowlist:
-            raise bad_request(
-                "INVALID_KEY",
-                "Enable at least one REST scope and/or MCP tool",
-            )
-        if allowlist:
-            try:
-                validate_mcp_tools_fit_rest_scopes(allowlist, scopes)
-            except ValueError as exc:
-                raise bad_request("INVALID_MCP_TOOLS", str(exc)) from exc
-        return scopes, allowlist
-
-    if rest_scopes:
-        return rest_scopes, None
-
-    raise bad_request(
-        "INVALID_KEY",
-        "Enable REST API scopes and/or MCP tools (send mcp_tools: [] for API-only)",
-    )
+            raise bad_request("INVALID_KEY", str(exc)) from exc
+        chosen = scopes_from_tool_names(names)
+    try:
+        return normalize_key_scopes(chosen)
+    except ValueError as exc:
+        raise bad_request("INVALID_KEY", str(exc)) from exc
 
 
 def _user_out(state: AppState, user: dict) -> UserOut:
@@ -124,8 +117,7 @@ def auth_me(
     if not auth:
         raise unauthorized()
     scopes = auth.get("scopes") or []
-    allowlist = auth.get("mcp_tool_allowlist")
-    tools, resources = _mcp_access(scopes, allowlist)
+    tools, resources = _mcp_access(scopes)
     credential_type = "session" if auth.get("user_id") else "api_key"
     user_id = auth.get("user_id")
     role = auth.get("role") or role_from_scopes(scopes)
@@ -151,17 +143,14 @@ def create_key(
     state: AppState = Depends(get_state),
     _auth=Depends(require_scope("admin")),
 ):
-    scopes, allowlist = _resolve_key_create(body)
-    created = state.api_keys.create_key(
-        body.name, scopes, mcp_tools=allowlist
-    )
+    scopes = _scopes_from_body(body.scopes, body.mcp_tools)
+    created = state.api_keys.create_key(_clean_name(body.name), scopes)
     payload = {
         k: v
         for k, v in created.items()
-        if k not in ("revoked_at", "key", "mcp_tool_allowlist")
+        if k not in ("revoked_at", "key")
     }
-    payload["mcp_tool_allowlist"] = created.get("mcp_tool_allowlist")
-    mcp_tools, mcp_resources = _mcp_access(scopes, allowlist)
+    mcp_tools, mcp_resources = _mcp_access(scopes)
     return ApiKeyCreated(
         **payload,
         key=created["key"],
@@ -180,6 +169,23 @@ def list_keys(
         for k in state.api_keys.list_keys()
         if k.get("revoked_at") is None
     ]
+
+
+@router.patch("/keys/{key_id}", response_model=ApiKeyOut)
+def update_key(
+    key_id: str,
+    body: ApiKeyUpdate,
+    state: AppState = Depends(get_state),
+    _auth=Depends(require_scope("admin")),
+):
+    if body.name is None and body.scopes is None:
+        raise bad_request("EMPTY_PATCH", "Provide a name or permissions to update")
+    name = _clean_name(body.name) if body.name is not None else None
+    scopes = _scopes_from_body(body.scopes) if body.scopes is not None else None
+    updated = state.api_keys.update_key(key_id, name=name, scopes=scopes)
+    if not updated:
+        raise not_found("API key not found")
+    return ApiKeyOut(**updated)
 
 
 @router.delete("/keys/{key_id}", status_code=204)

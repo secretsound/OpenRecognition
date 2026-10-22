@@ -194,11 +194,16 @@ class McpResourceOut(BaseModel):
 
 
 class ApiKeyCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=80)
     scopes: list[str] | None = None
-    """REST API scopes (read, recognize, enroll, admin). Independent of MCP tools."""
+    """Permissions: read, recognize, enroll, update, delete, admin. Each one covers REST and MCP."""
     mcp_tools: list[str] | None = None
-    """MCP tool allowlist. Use ``[]`` to disable MCP. Omitted = all tools allowed by scopes."""
+    """Deprecated. Used only when scopes is omitted, and then expanded to those permissions."""
+
+
+class ApiKeyUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=80)
+    scopes: list[str] | None = None
 
 
 class ApiKeyOut(BaseModel):
@@ -206,6 +211,7 @@ class ApiKeyOut(BaseModel):
     name: str
     scopes: list[str]
     mcp_tool_allowlist: list[str] | None = None
+    """Always null. MCP tools follow scopes."""
     created_at: str
     last_used_at: str | None = None
     revoked_at: str | None = None

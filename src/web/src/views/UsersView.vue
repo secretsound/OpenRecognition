@@ -132,8 +132,8 @@ const columns: DataTableColumns<UserOut> = [
   {
     title: "",
     key: "actions",
-    width: 88,
-    fixed: "right",
+    width: 120,
+    className: "actions-cell",
     render(row) {
       return h("div", { class: "row-actions", onClick: (e: Event) => e.stopPropagation() }, [
         h(
@@ -437,9 +437,14 @@ onMounted(load);
   font-size: 0.8rem;
 }
 
+:deep(.actions-cell) {
+  width: 120px;
+}
+
 :deep(.row-actions) {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   align-items: center;
+  justify-content: flex-end;
 }
 </style>

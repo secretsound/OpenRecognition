@@ -1,4 +1,4 @@
-"""Build a scope-filtered FastMCP server instance."""
+"""Build a scope-filtered MCP server instance."""
 
 from __future__ import annotations
 
@@ -13,11 +13,7 @@ from openrecognition.integrator.mcp.scopes import (
     resolve_mcp_resources,
     resolve_mcp_tools,
 )
-
-try:
-    from mcp.server.fastmcp import FastMCP
-except ImportError:
-    FastMCP = None  # type: ignore[misc, assignment]
+from openrecognition.integrator.mcp.server import mcp_server_class
 
 
 def _bind_client(fn: Callable[..., Any], client: OpenRecognitionClient) -> Callable[..., Any]:
@@ -40,8 +36,9 @@ def _bind_client(fn: Callable[..., Any], client: OpenRecognitionClient) -> Calla
 def build_mcp_server(
     granted_scopes: list[str],
     tool_allowlist: list[str] | None = None,
-) -> FastMCP:
-    if FastMCP is None:
+):
+    server_cls = mcp_server_class()
+    if server_cls is None:
         raise RuntimeError("MCP package not installed")
 
     client = OpenRecognitionClient.from_env()
@@ -49,7 +46,7 @@ def build_mcp_server(
     allowed_tools = {t["name"] for t in tool_metas}
     allowed_resources = {r["uri"] for r in resolve_mcp_resources(tool_metas)}
 
-    mcp = FastMCP(
+    mcp = server_cls(
         "openrecognition",
         instructions=(
             "OpenRecognition MCP bridge. Tools call the local REST API; "

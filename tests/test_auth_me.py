@@ -11,19 +11,18 @@ def test_auth_me_api_key(client, auth_headers):
     assert len(body["mcp_tools"]) == 9
 
 
-def test_auth_me_recognize_only_key(client, auth_headers):
+def test_auth_me_read_key_exposes_every_read_tool(client, auth_headers):
     created = client.post(
         "/v1/auth/keys",
         headers=auth_headers,
-        json={"name": "mcp-read-test", "mcp_tools": ["list_enrollments"]},
+        json={"name": "mcp-read-test", "scopes": ["read"]},
     )
     assert created.status_code == 200
     key = created.json()["key"]
-    assert created.json()["mcp_tools"]
-    assert len(created.json()["mcp_tools"]) == 1
+    names = {t["name"] for t in created.json()["mcp_tools"]}
+    assert names == {"get_health", "get_capabilities", "list_enrollments", "get_presence"}
 
     me = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {key}"})
     assert me.status_code == 200
-    names = {t["name"] for t in me.json()["mcp_tools"]}
-    assert names == {"list_enrollments"}
+    assert {t["name"] for t in me.json()["mcp_tools"]} == names
     assert me.json()["role"] == "viewer"

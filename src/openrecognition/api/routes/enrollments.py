@@ -18,7 +18,7 @@ from openrecognition.api.deps import (
     require_enrollment_view,
     require_scope,
 )
-from openrecognition.api.errors import bad_request, forbidden, not_found
+from openrecognition.api.errors import bad_request, forbidden, not_found, unauthorized
 from openrecognition.app_state import AppState
 from openrecognition.gallery.sample_meta import SampleMeta, parse_sample_meta_form
 from openrecognition.inference.video_demux import VideoDecodeError, is_video_container
@@ -448,8 +448,16 @@ def delete_enrollment(
     enrollment_id: str,
     purge_media: bool = False,
     state: AppState = Depends(get_state),
-    auth=Depends(require_scope("enroll")),
+    auth=Depends(get_auth),
 ):
+    if not auth:
+        raise unauthorized()
+    scopes = auth.get("scopes") or []
+    if auth.get("user_id"):
+        if "admin" not in scopes and "enroll" not in scopes:
+            raise forbidden("Scope 'enroll' required")
+    elif "admin" not in scopes and "delete" not in scopes:
+        raise forbidden("Scope 'delete' required")
     require_enrollment_view(state, auth, enrollment_id)
     if not can_delete_enrollment(state, auth, enrollment_id):
         raise forbidden("You can only delete enrollments you created")

@@ -47,23 +47,34 @@ const HOSTS: { id: HostId; label: string; path: string; hint: string }[] = [
   },
 ];
 
-const TOOL_TITLES: Record<string, string> = {
-  get_health: "Server status",
-  get_capabilities: "What this server can do",
-  list_enrollments: "Library",
-  get_presence: "Who was seen recently",
-  audio_gate: "Check if a clip is speech",
-  recognize_audio: "Match a voice",
-  recognize_image: "Match a photo",
-  recognize_image_url: "Match a photo from a link",
-  enroll_from_paths: "Add someone from files on this server",
-};
-
-const SCOPE_TITLES: Record<string, string> = {
-  read: "View",
-  recognize: "Recognize",
-  enroll: "Add to library",
-  admin: "Admin",
+const CAPABILITIES: Record<string, { label: string; hint: string; actions: Record<string, string> }> = {
+  read: {
+    label: "View",
+    hint: "Look through the library and see whether the server is ready.",
+    actions: {
+      get_health: "See if this server is ready.",
+      get_capabilities: "See which kinds of recognition are turned on.",
+      list_enrollments: "See people, pets, objects, and sounds in the library.",
+      get_presence: "See who was recognized recently.",
+    },
+  },
+  recognize: {
+    label: "Recognize",
+    hint: "Match a voice or a photo.",
+    actions: {
+      audio_gate: "Tell speech apart from other noise.",
+      recognize_audio: "Recognize who is speaking.",
+      recognize_image: "Recognize a face, pet, or object in a picture.",
+      recognize_image_url: "Recognize a picture from a link, such as a camera snapshot.",
+    },
+  },
+  enroll: {
+    label: "Add",
+    hint: "Create a profile from files already on this server.",
+    actions: {
+      enroll_from_paths: "Add a person from photos or audio stored here.",
+    },
+  },
 };
 
 const message = useMessage();
@@ -94,19 +105,26 @@ const configJson = computed(() => {
   return JSON.stringify(doc, null, 2);
 });
 
-const toolGroups = computed(() => {
+const capabilityGroups = computed(() => {
   const tools = info.value?.tools ?? [];
-  const groups: Record<string, McpToolOut[]> = {};
+  const byScope: Record<string, McpToolOut[]> = {};
   for (const tool of tools) {
-    (groups[tool.scope] ??= []).push(tool);
+    (byScope[tool.scope] ??= []).push(tool);
   }
   return ["read", "recognize", "enroll"]
-    .filter((scope) => groups[scope]?.length)
-    .map((scope) => ({
-      scope,
-      label: SCOPE_TITLES[scope] ?? scope,
-      tools: groups[scope]!,
-    }));
+    .filter((scope) => byScope[scope]?.length && CAPABILITIES[scope])
+    .map((scope) => {
+      const capability = CAPABILITIES[scope]!;
+      return {
+        scope,
+        label: capability.label,
+        hint: capability.hint,
+        actions: byScope[scope]!.map((tool) => ({
+          name: tool.name,
+          label: capability.actions[tool.name] ?? tool.description,
+        })),
+      };
+    });
 });
 
 const readyTag = computed(() => {
@@ -116,12 +134,7 @@ const readyTag = computed(() => {
     : { type: "warning" as const, label: "Models still loading" };
 });
 
-const mcpTag = computed(() => {
-  if (!info.value) return null;
-  return info.value.available
-    ? { type: "success" as const, label: "Assistant tools installed" }
-    : { type: "warning" as const, label: "Assistant tools not installed" };
-});
+const mcpMissing = computed(() => Boolean(info.value && !info.value.available));
 
 async function load() {
   loading.value = true;
@@ -156,9 +169,8 @@ onMounted(load);
   <div class="int-panel">
     <header class="int-panel__header">
       <p class="int-panel__lead">
-        An assistant such as Cursor or Claude can call this server. It runs
-        <code>openrecognition mcp</code> on the computer with the assistant, and talks to
-        OpenRecognition with an API key.
+        Let Cursor, Claude, or another assistant look people up and run a match.
+        Create a key, copy the setup, and paste it into that assistant.
       </p>
     </header>
 
@@ -169,23 +181,18 @@ onMounted(load);
         <div>
           <div class="conn-status__title">Assistant access</div>
           <p class="conn-status__hint">
-            Create a key, paste the setup into your assistant, then restart that assistant.
+            The assistant calls this server with the key. Restart the assistant after you paste the setup.
           </p>
         </div>
         <div class="conn-status__aside">
           <NTag v-if="readyTag" :type="readyTag.type" round :bordered="false">
             {{ readyTag.label }}
           </NTag>
-          <NTag v-if="mcpTag" :type="mcpTag.type" round :bordered="false">
-            {{ mcpTag.label }}
+          <NTag v-if="mcpMissing" type="warning" round :bordered="false">
+            Assistant support missing
           </NTag>
         </div>
       </div>
-
-      <NAlert v-if="info.install_hint" type="warning" title="Install assistant support" :bordered="false">
-        On the computer that runs the assistant, install
-        <code>{{ info.install_hint }}</code>
-      </NAlert>
 
       <NAlert v-if="!info.server_ready" type="info" title="Models are still loading" :bordered="false">
         Recognition waits until the models are ready. Check Models if this stays on.
@@ -194,10 +201,30 @@ onMounted(load);
       <section class="conn-block">
         <div class="conn-block__head">
           <div>
+            <h3 class="conn-block__title">What the assistant can do</h3>
+            <p class="conn-block__desc">
+              The key you create turns these on. View and Recognize cover a typical assistant.
+              Add lets it create profiles.
+            </p>
+          </div>
+        </div>
+        <div class="mcp-caps">
+          <article v-for="group in capabilityGroups" :key="group.scope" class="mcp-cap">
+            <h4 class="mcp-cap__title">{{ group.label }}</h4>
+            <p class="mcp-cap__hint">{{ group.hint }}</p>
+            <ul>
+              <li v-for="action in group.actions" :key="action.name">{{ action.label }}</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="conn-block">
+        <div class="conn-block__head">
+          <div>
             <h3 class="conn-block__title">1. Create an API key</h3>
             <p class="conn-block__desc">
-              A typical assistant needs View and Recognize. Add “Add to library” only if it should
-              enroll people.
+              View and Recognize are enough for most assistants. Turn on Add only if it should create profiles.
             </p>
           </div>
           <NButton type="primary" @click="showCreateKey = true">
@@ -250,37 +277,72 @@ onMounted(load);
           <NInput v-model:value="apiUrl" placeholder="http://127.0.0.1:8080" />
         </div>
 
-        <NCode class="conn-code" :code="configJson" language="json" word-wrap />
-      </section>
-
-      <section class="conn-block">
-        <div class="conn-block__head">
-          <div>
-            <h3 class="conn-block__title">What the assistant can do</h3>
-            <p class="conn-block__desc">
-              The API key decides which of these tools are allowed.
-            </p>
-          </div>
-        </div>
-        <div v-for="group in toolGroups" :key="group.scope" class="mcp-group">
-          <h4 class="mcp-group__title">{{ group.label }}</h4>
-          <ul class="conn-list">
-            <li v-for="tool in group.tools" :key="tool.name" class="conn-list__item">
-              <div>
-                <div class="conn-list__title">{{ TOOL_TITLES[tool.name] ?? tool.name }}</div>
-                <p class="conn-list__desc">{{ tool.description }}</p>
-              </div>
-            </li>
-          </ul>
+        <div class="mcp-setup">
+          <span class="conn-field__label">Setup to paste</span>
+          <NCode class="conn-code" :code="configJson" language="json" word-wrap />
         </div>
       </section>
 
       <CreateApiKeyModal
         v-model:show="showCreateKey"
-        :catalog="info"
         preset="mcp"
         @created="onKeyCreated"
       />
     </template>
   </div>
 </template>
+
+<style scoped>
+.mcp-caps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 0 16px;
+}
+
+.mcp-cap {
+  min-width: 0;
+  padding: 16px 16px 8px;
+  border-radius: var(--or-radius);
+  background: var(--or-surface-2, var(--n-color-embedded, rgba(127, 127, 127, 0.08)));
+}
+
+.mcp-cap__title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.mcp-cap__hint {
+  margin: 6px 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--n-text-color-3);
+}
+
+.mcp-cap ul {
+  margin: 12px 0 0;
+  padding: 0 0 8px 1.1rem;
+}
+
+.mcp-cap li {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--n-text-color-2);
+}
+
+.mcp-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+
+@media (max-width: 900px) {
+  .mcp-caps {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

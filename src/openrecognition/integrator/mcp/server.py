@@ -6,18 +6,29 @@ import os
 import sys
 
 _IMPORT_ERROR: BaseException | None = None
+_SERVER_CLS: type | None = None
 
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp import FastMCP as _SERVER_CLS
 except ImportError as exc:
-    FastMCP = None  # type: ignore[misc, assignment]
-    _IMPORT_ERROR = exc
+    try:
+        from mcp.server.mcpserver import MCPServer as _SERVER_CLS
+    except ImportError:
+        _SERVER_CLS = None
+        _IMPORT_ERROR = exc
+    else:
+        _IMPORT_ERROR = None
 else:
     _IMPORT_ERROR = None
 
 
+def mcp_server_class() -> type | None:
+    """MCP server class shipped with this install (v1 FastMCP or v2 MCPServer)."""
+    return _SERVER_CLS
+
+
 def mcp_available() -> bool:
-    return FastMCP is not None
+    return _SERVER_CLS is not None
 
 
 async def resolve_mcp_auth() -> dict | None:

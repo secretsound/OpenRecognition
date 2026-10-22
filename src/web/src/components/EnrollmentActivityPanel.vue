@@ -142,22 +142,27 @@ const columns: DataTableColumns<ActivityGroup> = [
   {
     title: "",
     key: "actions",
-    width: 48,
+    width: 80,
+    className: "actions-cell",
     render(row) {
       return h(
-        NButton,
-        {
-          quaternary: true,
-          size: "small",
-          title: "View details",
-          onClick: (e: Event) => {
-            e.stopPropagation();
-            openDetail(row);
+        "div",
+        { class: "row-actions" },
+        h(
+          NButton,
+          {
+            quaternary: true,
+            size: "small",
+            title: "View details",
+            onClick: (e: Event) => {
+              e.stopPropagation();
+              openDetail(row);
+            },
           },
-        },
-        {
-          icon: () => h(NIcon, { size: 18 }, () => h(EyeOutline)),
-        },
+          {
+            icon: () => h(NIcon, { size: 18 }, () => h(EyeOutline)),
+          },
+        ),
       );
     },
   },
@@ -291,5 +296,15 @@ onMounted(() => {
 
 :deep(.muted-cell) {
   color: var(--n-text-color-3);
+}
+
+:deep(.actions-cell) {
+  width: 80px;
+}
+
+:deep(.row-actions) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
 </style>

@@ -133,11 +133,11 @@ def is_admin_access(auth: dict | None) -> bool:
 
 
 def is_service_account(auth: dict | None) -> bool:
-    """API keys are not people. Enroll and admin keys keep the whole library."""
+    """API keys are not people. Library-writing keys keep the whole library."""
     if not auth or auth.get("user_id"):
         return False
     scopes = set(auth.get("scopes") or [])
-    return bool(scopes & {"admin", "enroll"})
+    return bool(scopes & {"admin", "enroll", "update", "delete"})
 
 
 def is_unrestricted_library(auth: dict | None) -> bool:
@@ -160,7 +160,20 @@ def library_limited_ids(state: AppState, auth: dict | None) -> set[str] | None:
     return None
 
 
+def _key_scopes(auth: dict | None) -> set[str]:
+    return set((auth or {}).get("scopes") or [])
+
+
 def enrollment_rights(state: AppState, auth: dict | None, enrollment_id: str) -> dict[str, bool]:
+    if is_admin_access(auth):
+        return dict(_FULL_RIGHTS)
+    if auth and not auth.get("user_id"):
+        scopes = _key_scopes(auth)
+        return {
+            "view": True,
+            "can_add_samples": "enroll" in scopes,
+            "can_manage": "update" in scopes,
+        }
     if is_unrestricted_library(auth):
         return dict(_FULL_RIGHTS)
     user_id = auth.get("user_id") if auth else None
@@ -179,6 +192,10 @@ def enrollment_rights(state: AppState, auth: dict | None, enrollment_id: str) ->
 
 
 def can_delete_enrollment(state: AppState, auth: dict | None, enrollment_id: str) -> bool:
+    if is_admin_access(auth):
+        return True
+    if auth and not auth.get("user_id"):
+        return "delete" in _key_scopes(auth)
     if is_unrestricted_library(auth):
         return True
     user_id = auth.get("user_id") if auth else None
