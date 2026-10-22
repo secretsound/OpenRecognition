@@ -1,5 +1,6 @@
 # Dev image — dependencies installed at build; bind-mount updates code at runtime.
 ARG BASE_IMAGE=python:3.12-bookworm
+FROM mwader/static-ffmpeg:8.1.1 AS ffmpeg
 FROM ${BASE_IMAGE}
 
 ARG USERNAME=vscode
@@ -11,9 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     libsndfile1 \
-    ffmpeg \
     sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Same static build as the published image. Debian's ffmpeg package pulls in
+# LLVM, Mesa, and most of X11, which is a long unpack on every cold build.
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg /ffprobe /usr/local/bin/ffprobe
 
 # Node.js 22 + npm (Vue / Vite web UI)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \

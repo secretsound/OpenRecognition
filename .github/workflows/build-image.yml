@@ -5,6 +5,11 @@
 #   dev
 #   sha-<commit>
 #   <tag>     only when the workflow input is set
+#
+# linux/amd64 and linux/arm64 build on native runners and are published
+# together. Emulating arm64 on an x86 runner is what made this job take
+# 11+ minutes. Each architecture keeps its own cache so an amd64 export
+# cannot replace the arm64 layers.
 
 name: Build image
 
@@ -36,14 +41,12 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  CACHE_SCOPE: manual
 
 jobs:
-  image:
+  guard:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the selected ref
-        uses: actions/checkout@v7
-
       - name: Check the extra tag
         env:
           EXTRA_TAG: ${{ inputs.tag }}
@@ -65,11 +68,35 @@ jobs:
             exit 1
           fi
 
+  build:
+    needs: guard
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    if: contains(inputs.platforms, matrix.platform)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+            smoke: true
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            smoke: false
+    steps:
+      - name: Check out the selected ref
+        uses: actions/checkout@v7
+
+      - name: Image name
+        run: echo "IMAGE=${REGISTRY}/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=dev
             type=sha
@@ -82,9 +109,6 @@ jobs:
             org.opencontainers.image.documentation=https://github.com/secretsound/OpenRecognition/blob/main/docker/README.md
             org.opencontainers.image.licenses=Apache-2.0
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -96,6 +120,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build linux/amd64 for a smoke test
+        if: matrix.smoke
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -105,10 +130,12 @@ jobs:
           tags: openrecognition:smoke
           provenance: false
           sbom: false
-          cache-from: type=gha,scope=manual
-          cache-to: type=gha,scope=manual,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ env.CACHE_SCOPE }}-${{ matrix.arch }}
+          cache-to: type=local,dest=${{ runner.temp }}/build-cache,mode=max
 
       - name: Smoke test
+        if: matrix.smoke
         run: |
           set -euo pipefail
           docker run -d --name or-smoke -p 8080:8080 openrecognition:smoke
@@ -133,24 +160,92 @@ jobs:
           echo "OpenRecognition did not answer /health/live" >&2
           exit 1
 
-      - name: Build and push
+      - name: Push by digest
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile.edge
-          platforms: ${{ inputs.platforms }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
-          cache-from: type=gha,scope=manual
-          cache-to: type=gha,scope=manual,mode=max
+          cache-from: ${{ matrix.smoke && format('type=local,src={0}/build-cache', runner.temp) || format('type=gha,scope={0}-{1}', env.CACHE_SCOPE, matrix.arch) }}
+          cache-to: type=gha,scope=${{ env.CACHE_SCOPE }}-${{ matrix.arch }},mode=max
 
-      - name: Show the published tags
-        env:
-          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+      - name: Export digest
         run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+          if-no-files-found: error
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Image name
+        run: echo "IMAGE=${REGISTRY}/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=dev
+            type=sha
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          flavor: |
+            latest=false
+          labels: |
+            org.opencontainers.image.title=OpenRecognition
+            org.opencontainers.image.description=Self-hosted voice, face, and object recognition. Mount /data and /models. The console listens on port 8080.
+            org.opencontainers.image.documentation=https://github.com/secretsound/OpenRecognition/blob/main/docker/README.md
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Create and push the manifest
+        id: manifest
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '%s@sha256:%s ' "$IMAGE" *)
+          first_tag="$(printf '%s\n' "$DOCKER_METADATA_OUTPUT_TAGS" | head -n 1)"
+          digest="$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest}}' | jq -r '.digest // .Digest // empty')"
+          if [ -z "$digest" ]; then
+            echo "Could not read the manifest digest for $first_tag" >&2
+            docker buildx imagetools inspect "$first_tag" >&2
+            exit 1
+          fi
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "Published:"
-          printf '%s\n' "$IMAGE_TAGS"
+          printf '%s\n' "$DOCKER_METADATA_OUTPUT_TAGS"
+          echo "Digest: ${digest}"
