@@ -251,9 +251,23 @@ jobs:
         working-directory: /tmp/digests
         run: |
           set -euo pipefail
+          sources=()
+          for digest in *; do
+            if ! printf '%s' "$digest" | grep -Eq '^[0-9a-f]{64}$'; then
+              echo "Skipping unexpected digest file: $digest" >&2
+              continue
+            fi
+            sources+=("${IMAGE}@sha256:${digest}")
+          done
+          if [ "${#sources[@]}" -eq 0 ]; then
+            echo "No image digests to publish" >&2
+            ls -la >&2
+            exit 1
+          fi
+          printf 'Merging %s\n' "${sources[@]}"
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '%s@sha256:%s ' "$IMAGE" *)
+            "${sources[@]}"
           first_tag="$(printf '%s\n' "$DOCKER_METADATA_OUTPUT_TAGS" | head -n 1)"
           digest="$(docker buildx imagetools inspect "$first_tag" --format '{{json .Manifest}}' | jq -r '.digest // .Digest // empty')"
           if [ -z "$digest" ]; then
